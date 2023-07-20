@@ -110,6 +110,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     }
 
     return [
+      // This approach works when the handler is part of the function source code
       new InstrumentationNodeModuleDefinition(
         // NB: The patching infrastructure seems to match names backwards, this must be the filename, while
         // InstrumentationNodeModuleFile must be the module name.
@@ -137,7 +138,25 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
           ),
         ]
       ),
-    ];
+      // This approach works when the handler is part of lambda layer
+      new InstrumentationNodeModuleDefinition(
+        module,
+        ['*'],
+        (moduleExports: LambdaModule) => {
+          diag.debug('Applying patch for lambda handler');
+          if (isWrapped(moduleExports[functionName])) {
+            this._unwrap(moduleExports, functionName);
+          }
+          this._wrap(moduleExports, functionName, this._getHandler());
+          return moduleExports;
+        },
+        (moduleExports?: LambdaModule) => {
+          if (moduleExports == undefined) return;
+          diag.debug('Removing patch for lambda handler');
+          this._unwrap(moduleExports, functionName);
+        }
+      ),
+    ]
   }
 
   private _getHandler() {
