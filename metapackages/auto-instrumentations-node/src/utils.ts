@@ -54,6 +54,34 @@ import { SocketIoInstrumentation } from '@opentelemetry/instrumentation-socket.i
 import { TediousInstrumentation } from '@opentelemetry/instrumentation-tedious';
 import { WinstonInstrumentation } from '@opentelemetry/instrumentation-winston';
 
+import { alibabaCloudEcsDetector } from '@opentelemetry/resource-detector-alibaba-cloud';
+import {
+  awsBeanstalkDetector,
+  awsEc2Detector,
+  awsEcsDetector,
+  awsEksDetector,
+  awsLambdaDetector,
+} from '@opentelemetry/resource-detector-aws';
+import { containerDetector } from '@opentelemetry/resource-detector-container';
+import { gcpDetector } from '@opentelemetry/resource-detector-gcp';
+import {
+  Detector,
+  DetectorSync,
+  envDetectorSync,
+  hostDetectorSync,
+  osDetectorSync,
+  processDetectorSync,
+} from '@opentelemetry/resources';
+
+const RESOURCE_DETECTOR_CONTAINER = 'container';
+const RESOURCE_DETECTOR_ENVIRONMENT = 'env';
+const RESOURCE_DETECTOR_HOST = 'host';
+const RESOURCE_DETECTOR_OS = 'os';
+const RESOURCE_DETECTOR_PROCESS = 'process';
+const RESOURCE_DETECTOR_ALIBABA = 'alibaba';
+const RESOURCE_DETECTOR_AWS = 'aws';
+const RESOURCE_DETECTOR_GCP = 'gcp';
+
 const InstrumentationMap = {
   '@opentelemetry/instrumentation-amqplib': AmqplibInstrumentation,
   '@opentelemetry/instrumentation-aws-lambda': AwsLambdaInstrumentation,
@@ -98,7 +126,7 @@ const InstrumentationMap = {
 type ConfigArg<T> = T extends new (...args: infer U) => unknown ? U[0] : never;
 export type InstrumentationConfigMap = {
   [Name in keyof typeof InstrumentationMap]?: ConfigArg<
-    typeof InstrumentationMap[Name]
+    (typeof InstrumentationMap)[Name]
   >;
 };
 
@@ -119,7 +147,7 @@ export function getNodeAutoInstrumentations(
   >) {
     const Instance = InstrumentationMap[name];
     // Defaults are defined by the instrumentation itself
-    const userConfig = inputConfigs[name] ?? {};
+    const userConfig: any = inputConfigs[name] ?? {};
 
     if (userConfig.enabled === false) {
       diag.debug(`Disabling instrumentation for ${name}`);
@@ -129,10 +157,56 @@ export function getNodeAutoInstrumentations(
     try {
       diag.debug(`Loading instrumentation for ${name}`);
       instrumentations.push(new Instance(userConfig));
-    } catch (e) {
+    } catch (e: any) {
       diag.error(e);
     }
   }
 
   return instrumentations;
+}
+
+export function getResourceDetectorsFromEnv(): Array<Detector | DetectorSync> {
+  const resourceDetectors = new Map<
+    string,
+    Detector | DetectorSync | Detector[]
+  >([
+    [RESOURCE_DETECTOR_CONTAINER, containerDetector],
+    [RESOURCE_DETECTOR_ENVIRONMENT, envDetectorSync],
+    [RESOURCE_DETECTOR_HOST, hostDetectorSync],
+    [RESOURCE_DETECTOR_OS, osDetectorSync],
+    [RESOURCE_DETECTOR_PROCESS, processDetectorSync],
+    [RESOURCE_DETECTOR_ALIBABA, alibabaCloudEcsDetector],
+    [RESOURCE_DETECTOR_GCP, gcpDetector],
+    [
+      RESOURCE_DETECTOR_AWS,
+      [
+        awsEc2Detector,
+        awsEcsDetector,
+        awsEksDetector,
+        awsBeanstalkDetector,
+        awsLambdaDetector,
+      ],
+    ],
+  ]);
+
+  const resourceDetectorsFromEnv =
+    process.env.OTEL_NODE_RESOURCE_DETECTORS?.split(',') ?? ['all'];
+
+  if (resourceDetectorsFromEnv.includes('all')) {
+    return [...resourceDetectors.values()].flat();
+  }
+
+  if (resourceDetectorsFromEnv.includes('none')) {
+    return [];
+  }
+
+  return resourceDetectorsFromEnv.flatMap(detector => {
+    const resourceDetector = resourceDetectors.get(detector);
+    if (!resourceDetector) {
+      diag.error(
+        `Invalid resource detector "${detector}" specified in the environment variable OTEL_NODE_RESOURCE_DETECTORS`
+      );
+    }
+    return resourceDetector || [];
+  });
 }

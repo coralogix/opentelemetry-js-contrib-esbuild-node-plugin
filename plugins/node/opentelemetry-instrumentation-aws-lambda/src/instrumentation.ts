@@ -15,6 +15,7 @@
  */
 
 import * as path from 'path';
+import * as fs from 'fs';
 
 import {
   InstrumentationBase,
@@ -29,6 +30,7 @@ import {
   diag,
   propagation,
   ROOT_CONTEXT,
+  MeterProvider,
   Span,
   SpanKind,
   SpanStatusCode,
@@ -77,8 +79,9 @@ export const traceContextEnvironmentKey = '_X_AMZN_TRACE_ID';
 export const xForwardProto = 'X-Forwarded-Proto';
 
 export class AwsLambdaInstrumentation extends InstrumentationBase {
-  private _forceFlush?: () => Promise<void>;
   private triggerOrigin: TriggerOrigin | undefined;
+  private _traceForceFlusher?: () => Promise<void>;
+  private _metricForceFlusher?: () => Promise<void>;
 
   constructor(protected override _config: AwsLambdaInstrumentationConfig = {}) {
     super('@opentelemetry/instrumentation-aws-lambda', VERSION, _config);
@@ -105,8 +108,15 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     // Lambda loads user function using an absolute path.
     let filename = path.resolve(taskRoot, moduleRoot, module);
     if (!filename.endsWith('.js')) {
-      // Patching infrastructure currently requires a filename when requiring with an absolute path.
-      filename += '.js';
+      // its impossible to know in advance if the user has a cjs or js file.
+      // check that the .js file exists otherwise fallback to next known possibility
+      try {
+        fs.statSync(`${filename}.js`);
+        filename += '.js';
+      } catch (e) {
+        // fallback to .cjs
+        filename += '.cjs';
+      }
     }
 
     return [
@@ -131,7 +141,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
               return moduleExports;
             },
             (moduleExports?: LambdaModule) => {
-              if (moduleExports == undefined) return;
+              if (moduleExports == null) return;
               diag.debug('Removing patch for lambda handler');
               this._unwrap(moduleExports, functionName);
             }
@@ -362,11 +372,6 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     return { triggerOrigin: origin, triggerSpan };
   }
 
-  override setTracerProvider(tracerProvider: TracerProvider) {
-    super.setTracerProvider(tracerProvider);
-    this._forceFlush = this._getForceFlush(tracerProvider);
-  }
-
   private async _endWrapperSpan(
     span: Span,
     lambdaResponse: any,
@@ -395,23 +400,6 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     span.end();
   }
 
-  private _getForceFlush(tracerProvider: TracerProvider) {
-    if (!tracerProvider) return undefined;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let currentProvider: any = tracerProvider;
-
-    if (typeof currentProvider.getDelegate === 'function') {
-      currentProvider = currentProvider.getDelegate();
-    }
-
-    if (typeof currentProvider.forceFlush === 'function') {
-      return currentProvider.forceFlush.bind(currentProvider);
-    }
-
-    return undefined;
-  }
-
   private _wrapCallback(
     originalAWSLambdaCallback: Callback,
     span: Span,
@@ -435,17 +423,27 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
   }
 
   private async _flush() {
-    if (this._forceFlush) {
-      try {
-        await this._forceFlush();
-      } catch (e) {
-        // We must not fail this call, but we may log it
-        diag.error('Error while flushing the lambda', e);
-      }
+    const flushers = [];
+    if (this._traceForceFlusher) {
+      flushers.push(this._traceForceFlusher());
     } else {
       diag.error(
         'Spans may not be exported for the lambda function because we are not force flushing before callback.'
       );
+    }
+    if (this._metricForceFlusher) {
+      flushers.push(this._metricForceFlusher());
+    } else {
+      diag.error(
+        'Metrics may not be exported for the lambda function because we are not force flushing before callback.'
+      );
+    }
+
+    try {
+      await Promise.all(flushers);
+    } catch (e) {
+      // We must not fail this call, but we may log it
+      diag.error('Error while flushing the lambda', e);
     }
   }
 
@@ -472,6 +470,46 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       errMessage = err.message;
     }
     return errMessage;
+  }
+
+  override setTracerProvider(tracerProvider: TracerProvider) {
+    super.setTracerProvider(tracerProvider);
+    this._traceForceFlusher = this._traceForceFlush(tracerProvider);
+  }
+
+  private _traceForceFlush(tracerProvider: TracerProvider) {
+    if (!tracerProvider) return undefined;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let currentProvider: any = tracerProvider;
+
+    if (typeof currentProvider.getDelegate === 'function') {
+      currentProvider = currentProvider.getDelegate();
+    }
+
+    if (typeof currentProvider.forceFlush === 'function') {
+      return currentProvider.forceFlush.bind(currentProvider);
+    }
+
+    return undefined;
+  }
+
+  override setMeterProvider(meterProvider: MeterProvider) {
+    super.setMeterProvider(meterProvider);
+    this._metricForceFlusher = this._metricForceFlush(meterProvider);
+  }
+
+  private _metricForceFlush(meterProvider: MeterProvider) {
+    if (!meterProvider) return undefined;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentProvider: any = meterProvider;
+
+    if (typeof currentProvider.forceFlush === 'function') {
+      return currentProvider.forceFlush.bind(currentProvider);
+    }
+
+    return undefined;
   }
 
   private _applyResponseHook(
