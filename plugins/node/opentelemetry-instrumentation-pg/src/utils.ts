@@ -22,8 +22,6 @@ import {
   Tracer,
   SpanKind,
   diag,
-  INVALID_SPAN_CONTEXT,
-  Attributes,
   defaultTextMapSetter,
   ROOT_CONTEXT,
 } from '@opentelemetry/api';
@@ -36,7 +34,6 @@ import {
 import {
   PgClientExtended,
   PostgresCallback,
-  PgErrorCallback,
   PgPoolCallback,
   PgPoolExtended,
   PgParsedConnectionParams,
@@ -45,10 +42,6 @@ import { PgInstrumentationConfig } from './types';
 import type * as pgTypes from 'pg';
 import { PgInstrumentation } from './';
 import { safeExecuteInTheMiddle } from '@opentelemetry/instrumentation';
-
-function arrayStringifyHelper(arr: Array<unknown>): string {
-  return '[' + arr.toString() + ']';
-}
 
 /**
  * Helper function to get a low cardinality span name from whatever info we have
@@ -116,24 +109,13 @@ export function getSemanticAttributesFromConnection(
   };
 }
 
-export function startSpan(
-  tracer: Tracer,
-  instrumentationConfig: PgInstrumentationConfig,
-  name: string,
-  attributes: Attributes
-): Span {
-  // If a parent span is required but not present, use a noop span to propagate
-  // context without recording it. Adapted from opentelemetry-instrumentation-http:
-  // https://github.com/open-telemetry/opentelemetry-js/blob/597ea98e58a4f68bcd9aec5fd283852efe444cd6/experimental/packages/opentelemetry-instrumentation-http/src/http.ts#L660
-  const currentSpan = trace.getSpan(context.active());
-  if (instrumentationConfig.requireParentSpan && currentSpan === undefined) {
-    return trace.wrapSpanContext(INVALID_SPAN_CONTEXT);
-  }
-
-  return tracer.startSpan(name, {
-    kind: SpanKind.CLIENT,
-    attributes,
-  });
+export function shouldSkipInstrumentation(
+  instrumentationConfig: PgInstrumentationConfig
+) {
+  return (
+    instrumentationConfig.requireParentSpan === true &&
+    trace.getSpan(context.active()) === undefined
+  );
 }
 
 // Create a span from our normalized queryConfig object,
@@ -149,9 +131,12 @@ export function handleConfigQuery(
   const dbName = connectionParameters.database;
 
   const spanName = getQuerySpanName(dbName, queryConfig);
-  const span = startSpan(tracer, instrumentationConfig, spanName, {
-    [SemanticAttributes.DB_SYSTEM]: DbSystemValues.POSTGRESQL, // required
-    ...getSemanticAttributesFromConnection(connectionParameters),
+  const span = tracer.startSpan(spanName, {
+    kind: SpanKind.CLIENT,
+    attributes: {
+      [SemanticAttributes.DB_SYSTEM]: DbSystemValues.POSTGRESQL, // required
+      ...getSemanticAttributesFromConnection(connectionParameters),
+    },
   });
 
   if (!queryConfig) {
@@ -167,10 +152,26 @@ export function handleConfigQuery(
     instrumentationConfig.enhancedDatabaseReporting &&
     Array.isArray(queryConfig.values)
   ) {
-    span.setAttribute(
-      AttributeNames.PG_VALUES,
-      arrayStringifyHelper(queryConfig.values)
-    );
+    try {
+      const convertedValues = queryConfig.values.map(value => {
+        if (value == null) {
+          return 'null';
+        } else if (value instanceof Buffer) {
+          return value.toString();
+        } else if (typeof value === 'object') {
+          if (typeof value.toPostgres === 'function') {
+            return value.toPostgres();
+          }
+          return JSON.stringify(value);
+        } else {
+          //string, number
+          return value.toString();
+        }
+      });
+      span.setAttribute(AttributeNames.PG_VALUES, convertedValues);
+    } catch (e) {
+      diag.error('failed to stringify ', queryConfig.values, e);
+    }
   }
 
   // Set plan name attribute, if present
@@ -249,10 +250,7 @@ export function patchCallbackPGPool(
   };
 }
 
-export function patchClientConnectCallback(
-  span: Span,
-  cb: PgErrorCallback
-): PgErrorCallback {
+export function patchClientConnectCallback(span: Span, cb: Function): Function {
   return function patchedClientConnectCallback(
     this: pgTypes.Client,
     err: Error
@@ -264,7 +262,7 @@ export function patchClientConnectCallback(
       });
     }
     span.end();
-    cb.call(this, err);
+    cb.apply(this, arguments);
   };
 }
 

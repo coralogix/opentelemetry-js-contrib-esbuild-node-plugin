@@ -18,6 +18,39 @@
   * devDependencies
     * @opentelemetry/contrib-test-utils bumped from ^0.32.0 to ^0.33.0
 
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @opentelemetry/contrib-test-utils bumped from ^0.33.0 to ^0.33.1
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @opentelemetry/contrib-test-utils bumped from ^0.33.1 to ^0.33.2
+
+## [0.28.2](https://github.com/open-telemetry/opentelemetry-js-contrib/compare/resource-detector-gcp-v0.28.1...resource-detector-gcp-v0.28.2) (2023-05-16)
+
+
+### Bug Fixes
+
+* **eslint-config:** replace gts with prettier and eslint ([#1439](https://github.com/open-telemetry/opentelemetry-js-contrib/issues/1439)) ([2571c37](https://github.com/open-telemetry/opentelemetry-js-contrib/commit/2571c371be1b5738442200cab2415b6a04c32aab))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @opentelemetry/contrib-test-utils bumped from ^0.33.2 to ^0.33.3
+
+## [0.28.0](https://github.com/open-telemetry/opentelemetry-js-contrib/compare/resource-detector-gcp-v0.27.5...resource-detector-gcp-v0.28.0) (2023-02-08)
+
+
+### Features
+
+* **detector-gcp:** collect hostname resource attribute from GCP Metadata API ([#1364](https://github.com/open-telemetry/opentelemetry-js-contrib/issues/1364)) ([33c57cc](https://github.com/open-telemetry/opentelemetry-js-contrib/commit/33c57cc84a8b87ad3a58dde2014738deab1c375b))
+
 ## [0.27.3](https://github.com/open-telemetry/opentelemetry-js-contrib/compare/resource-detector-gcp-v0.27.2...resource-detector-gcp-v0.27.3) (2022-11-02)
 
 
