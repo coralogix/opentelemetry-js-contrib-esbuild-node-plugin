@@ -24,6 +24,7 @@ import {
 import { DynamodbServiceExtension } from './dynamodb';
 import { SnsServiceExtension } from './sns';
 import { LambdaServiceExtension } from './lambda';
+import { EventBridgeServiceExtension } from './event-bridge';
 
 export class ServicesExtensions implements ServiceExtension {
   services: Map<string, ServiceExtension> = new Map();
@@ -33,6 +34,7 @@ export class ServicesExtensions implements ServiceExtension {
     this.services.set('SNS', new SnsServiceExtension());
     this.services.set('DynamoDB', new DynamodbServiceExtension());
     this.services.set('Lambda', new LambdaServiceExtension());
+    this.services.set('EventBridge', new EventBridgeServiceExtension());
   }
 
   requestPreSpanHook(request: NormalizedRequest): RequestMetadata {

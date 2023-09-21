@@ -23,7 +23,7 @@ import { isDefined } from '../utils';
 import { Attributes, SpanKind } from '@opentelemetry/api';
 import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
 import { DbSystemValues } from '@opentelemetry/semantic-conventions/build/src/trace/SemanticAttributes';
-import {TriggerOrigin} from "./index";
+import { TriggerOrigin } from './index';
 
 export const isDynamoDBStreamEvent =
   validateRecordsEvent<DynamoDBStreamEvent>('aws:dynamodb');

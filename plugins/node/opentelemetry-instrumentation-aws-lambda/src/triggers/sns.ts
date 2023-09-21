@@ -13,11 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {Attributes, SpanKind} from '@opentelemetry/api';
-import {SemanticAttributes} from '@opentelemetry/semantic-conventions';
-import {SNSEvent} from 'aws-lambda';
-import {LambdaTrigger, TriggerSpanInitializerResult, validateRecordsEvent,} from './common';
-import {TriggerOrigin} from "./index";
+import { Attributes, SpanKind } from '@opentelemetry/api';
+import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
+import { SNSEvent } from 'aws-lambda';
+import {
+  LambdaTrigger,
+  TriggerSpanInitializerResult,
+  validateRecordsEvent,
+} from './common';
+import { TriggerOrigin } from './index';
 
 const snsAttributes: Attributes = {
   [SemanticAttributes.FAAS_TRIGGER]: 'pubsub',

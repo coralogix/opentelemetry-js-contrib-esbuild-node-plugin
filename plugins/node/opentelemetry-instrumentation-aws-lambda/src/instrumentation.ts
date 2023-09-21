@@ -173,12 +173,12 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
           return moduleExports;
         },
         (moduleExports?: LambdaModule) => {
-          if (moduleExports == undefined) return;
+          if (moduleExports === undefined) return;
           diag.debug('Removing patch for lambda handler');
           this._unwrap(moduleExports, functionName);
         }
       ),
-    ]
+    ];
   }
 
   private _getHandler() {
@@ -294,7 +294,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
         } catch (e) {
           // Catching a lambda that synchronously failed
 
-          plugin._flush();
+          void plugin._flush();
           throw e;
         }
       } else {
@@ -309,7 +309,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
                   value => {
                     strict(triggerSpan);
 
-                    plugin._endWrapperSpan(triggerSpan, value, undefined);
+                    void plugin._endWrapperSpan(triggerSpan, value, undefined);
 
                     return value;
                   },
@@ -324,7 +324,11 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
                 strict(triggerSpan);
 
                 //if (hasLambdaSynchronouslyThrown) {
-                plugin._endWrapperSpan(triggerSpan, innerResult, undefined);
+                void plugin._endWrapperSpan(
+                  triggerSpan,
+                  innerResult,
+                  undefined
+                );
                 // }
                 // Fallthrough: sync reply, but callback may be in use. No way to query the event loop !
               }
@@ -334,8 +338,8 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
             error => {
               if (error) {
                 strict(triggerSpan);
-                plugin._endWrapperSpan(triggerSpan, undefined, error);
-                plugin._flush();
+                void plugin._endWrapperSpan(triggerSpan, undefined, error);
+                void plugin._flush();
               }
             }
           );
@@ -424,10 +428,10 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
 
       plugin._endSpan(span, err);
       if (wrapperSpan) {
-        plugin._endWrapperSpan(wrapperSpan, res, err);
+        void plugin._endWrapperSpan(wrapperSpan, res, err);
       }
 
-      this._flush().then(() => {
+      void this._flush().then(() => {
         diag.debug('executing original lookup callback function');
         originalAWSLambdaCallback.apply(this, [err, res]); // End of the function
       });

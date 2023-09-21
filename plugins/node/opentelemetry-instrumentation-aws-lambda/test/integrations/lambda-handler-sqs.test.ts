@@ -34,6 +34,7 @@ import * as assert from 'assert';
 import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
 import {
   defaultTextMapSetter,
+  propagation,
   ROOT_CONTEXT,
   SpanContext,
   SpanKind,
@@ -133,9 +134,22 @@ awsPropagator.inject(
 
 const AWSTraceHeader = carrier[AWSXRAY_TRACE_ID_HEADER];
 
-const sqsRecordWithLink: SQSRecord = {
+const sqRecordWithSystemAttributesLink: SQSRecord = {
   ...sqsRecord1,
   attributes: { ...sqsRecord1.attributes, AWSTraceHeader },
+};
+
+const newMessageAttributes = { ...sqsRecord1.messageAttributes };
+
+propagation.inject(
+  trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(linkContext)),
+  newMessageAttributes,
+  defaultTextMapSetter
+);
+
+const sqRecordWithMessageAttributesLink: SQSRecord = {
+  ...sqsRecord1,
+  messageAttributes: newMessageAttributes,
 };
 
 const assertSQSEventSpan = (span: ReadableSpan, sourceName?: string) => {
@@ -283,11 +297,11 @@ describe('SQS handler', () => {
       assertSQSEventSpanSuccess(sqsSpan, 'multiple_sources');
     });
 
-    it('sqs span links should be extracted from AWSTraceHeader attribute using xray propagator', async () => {
+    it('sqs span links should be extracted from AWSTraceHeader system attribute using xray propagator', async () => {
       initializeHandler('lambda-test/sqs.handler');
 
       const event: SQSEvent = {
-        Records: [sqsRecordWithLink],
+        Records: [sqRecordWithSystemAttributesLink],
       };
 
       await lambdaRequire('lambda-test/sqs').handler(event, ctx);
@@ -295,7 +309,34 @@ describe('SQS handler', () => {
       const spans = memoryExporter.getFinishedSpans();
       assert.strictEqual(spans.length, 2);
       const [_, sqsSpan] = spans;
-      assertSQSEventSpanSuccess(sqsSpan, sqsRecordWithLink.eventSourceARN);
+      assertSQSEventSpanSuccess(
+        sqsSpan,
+        sqRecordWithSystemAttributesLink.eventSourceARN
+      );
+      assert.strictEqual(sqsSpan.links.length, 1);
+      const {
+        links: [link],
+      } = sqsSpan;
+
+      assert.deepStrictEqual(link.context, linkContext);
+    });
+
+    it('sqs span links should be extracted from MessageAttributes using normal propagation', async () => {
+      initializeHandler('lambda-test/sqs.handler');
+
+      const event: SQSEvent = {
+        Records: [sqRecordWithMessageAttributesLink],
+      };
+
+      await lambdaRequire('lambda-test/sqs').handler(event, ctx);
+
+      const spans = memoryExporter.getFinishedSpans();
+      assert.strictEqual(spans.length, 2);
+      const [_, sqsSpan] = spans;
+      assertSQSEventSpanSuccess(
+        sqsSpan,
+        sqRecordWithMessageAttributesLink.eventSourceARN
+      );
       assert.strictEqual(sqsSpan.links.length, 1);
       const {
         links: [link],

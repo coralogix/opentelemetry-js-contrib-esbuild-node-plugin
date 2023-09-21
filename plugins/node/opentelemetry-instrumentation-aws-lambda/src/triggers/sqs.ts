@@ -16,6 +16,7 @@
 import {
   Attributes,
   Link,
+  propagation,
   SpanKind,
   TextMapGetter,
   trace,
@@ -34,6 +35,7 @@ import {
   validateRecordsEvent,
 } from './common';
 import { TriggerOrigin } from './index';
+import { defaultTextMapGetter } from '@opentelemetry/api/build/src/propagation/TextMapPropagator';
 
 const sqsAttributes: Attributes = {
   [SemanticAttributes.FAAS_TRIGGER]: 'pubsub',
@@ -54,7 +56,39 @@ const headerGetter: TextMapGetter<APIGatewayProxyEventHeaders> = {
 
 const isSQSEvent = validateRecordsEvent<SQSEvent>('aws:sqs');
 
-function getSQSRecordLink(record: SQSRecord): Link | undefined {
+function getSQSRecordLink(record: SQSRecord): Link[] {
+  return [
+    getSqsLinkFromMessageAttributes(record),
+    getSqsLinkFromSystemMessageAttributes(record),
+  ].filter(isDefined);
+}
+
+/*
+  as defined here
+  https://github.com/open-telemetry/opentelemetry-specification/blob/v1.24.0/supplementary-guidelines/compatibility/aws.md#context-propagation
+  and propagated here
+  https://github.com/open-telemetry/opentelemetry-js-contrib/blob/main/plugins/node/opentelemetry-instrumentation-aws-sdk/src/services/sqs.ts#L102
+ */
+function getSqsLinkFromMessageAttributes(record: SQSRecord): Link | undefined {
+  const { messageAttributes } = record ?? {};
+  if (!messageAttributes) return undefined;
+  const extractedContext = propagation.extract(
+    otelContext.active(),
+    messageAttributes,
+    defaultTextMapGetter
+  );
+  const context = trace.getSpan(extractedContext)?.spanContext();
+  if (!context) return undefined;
+  return { context };
+}
+
+/*
+  as defined here
+  https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/aws-lambda/#sqs-event
+ */
+function getSqsLinkFromSystemMessageAttributes(
+  record: SQSRecord
+): Link | undefined {
   const { AWSTraceHeader } = record?.attributes ?? {};
   if (!AWSTraceHeader) return undefined;
   const extractedContext = awsPropagator.extract(
@@ -82,9 +116,7 @@ function sqsSpanInitializer(event: SQSEvent): TriggerSpanInitializerResult {
     'messaging.batch.message_count': records.length,
   };
 
-  let links: Link[] | undefined = records
-    .map(getSQSRecordLink)
-    .filter(isDefined);
+  let links: Link[] | undefined = records.flatMap(getSQSRecordLink);
 
   links = links?.length === 0 ? undefined : links;
 

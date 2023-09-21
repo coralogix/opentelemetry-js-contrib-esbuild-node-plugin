@@ -14,9 +14,22 @@
  * limitations under the License.
  */
 import { EventBridgeEvent } from 'aws-lambda';
-import { Attributes, SpanKind } from '@opentelemetry/api';
+import {
+  Attributes,
+  Link,
+  SpanKind,
+  diag,
+  propagation,
+  trace,
+} from '@opentelemetry/api';
 import { LambdaTrigger, TriggerSpanInitializerResult } from './common';
-import {TriggerOrigin} from "./index";
+import { TriggerOrigin } from './index';
+import { SpanOptions } from '@opentelemetry/api/build/src/trace/SpanOptions';
+import { context as otelContext } from '@opentelemetry/api/build/src/context-api';
+import { defaultTextMapGetter } from '@opentelemetry/api/build/src/propagation/TextMapPropagator';
+
+export const CONTEXT_KEY = '_context';
+type EventBridgeDetailWithContext = { [CONTEXT_KEY]?: object } & object;
 
 const isEventBridgeEvent = (
   event: any
@@ -29,17 +42,71 @@ const isEventBridgeEvent = (
   );
 };
 
+const getDetailsFromEvent = (
+  entry: EventBridgeEvent<string, any>
+): EventBridgeDetailWithContext | undefined => {
+  if (typeof entry.detail === 'object') {
+    return entry.detail as EventBridgeDetailWithContext;
+  }
+
+  if (entry.detail === undefined) {
+    diag.debug(
+      'EventBridge instrumentation: cannot extract propagated context from EventBridge event due to event details are undefined'
+    );
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(entry.detail) as EventBridgeDetailWithContext;
+  } catch (error) {
+    diag.debug(
+      `EventBridge instrumentation: cannot extract propagated context from EventBridge event due to event Detail is not a valid json: ${entry.detail}`
+    );
+    return undefined;
+  }
+};
+
+const extractEventBridgeLink = (
+  event: EventBridgeEvent<string, any>
+): Link | undefined => {
+  const parsedDetails = getDetailsFromEvent(event);
+  if (parsedDetails === undefined) {
+    // failed to parse event details
+    return undefined;
+  }
+
+  if (!parsedDetails._context) {
+    diag.debug(
+      `EventBridge instrumentation: cannot extract propagated context from EventBridge event due to context key (${CONTEXT_KEY}) does not exist in event details`
+    );
+    return undefined;
+  }
+
+  const extractedContext = propagation.extract(
+    otelContext.active(),
+    parsedDetails[CONTEXT_KEY],
+    defaultTextMapGetter
+  );
+  const context = trace.getSpan(extractedContext)?.spanContext();
+  if (!context) return undefined;
+  return { context };
+};
+
 function initializeEventBridgeSpan(
   event: EventBridgeEvent<string, any>
 ): TriggerSpanInitializerResult {
   const attributes: Attributes = {
-    'aws.event.bridge.trigger.service': event.source,
+    'aws.event.bridge.trigger.source': event.source,
   };
   const name = event['detail-type'] ?? 'event bridge event';
-  const options = {
-    kind: SpanKind.SERVER,
+  const link = extractEventBridgeLink(event);
+  const links = link ? [link] : undefined;
+  const options: SpanOptions = {
+    kind: SpanKind.CONSUMER,
     attributes,
+    links,
   };
+
   return { name, options, origin: TriggerOrigin.EVENT_BRIDGE };
 }
 

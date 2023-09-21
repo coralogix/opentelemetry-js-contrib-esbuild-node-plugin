@@ -69,7 +69,7 @@ function initializeRestApiGatewaySpan(
       attributes,
       Object.fromEntries(
         Object.entries(multiValueQueryStringParameters).map(
-          ([k, v]) => [`http.request.query.${k}`, v?.length == 1 ? v[0] : v] // We don't have a semantic attribute for query parameters, but would be useful nonetheless
+          ([k, v]) => [`http.request.query.${k}`, v?.length === 1 ? v[0] : v] // We don't have a semantic attribute for query parameters, but would be useful nonetheless
         )
       )
     );
@@ -82,7 +82,7 @@ function initializeRestApiGatewaySpan(
         Object.entries(multiValueHeaders).map(([headerName, headerValue]) => [
           // See https://opentelemetry.io/docs/reference/specification/trace/semantic_conventions/http/#http-request-and-response-headers
           `http.request.header.${headerName}`,
-          headerValue?.length == 1 ? headerValue[0] : headerValue,
+          headerValue?.length === 1 ? headerValue[0] : headerValue,
         ])
       )
     );

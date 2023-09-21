@@ -13,17 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {LambdaTrigger, TriggerSpanInitializerResult, validateRecordsEvent,} from './common';
-import {Attributes, SpanKind} from '@opentelemetry/api';
-import {SESEvent} from 'aws-lambda';
-import {TriggerOrigin} from './index';
+import {
+  LambdaTrigger,
+  TriggerSpanInitializerResult,
+  validateRecordsEvent,
+} from './common';
+import { Attributes, SpanKind } from '@opentelemetry/api';
+import { SESEvent } from 'aws-lambda';
+import { TriggerOrigin } from './index';
 
 const isSESEvent = validateRecordsEvent<SESEvent>('aws:ses', ['ses']);
 
 function initializeSESSpan(event: SESEvent): TriggerSpanInitializerResult {
   const { Records: records } = event;
-  const attributes: Attributes = {
-  };
+  const attributes: Attributes = {};
 
   if (records.length === 1) {
     const record = records[0];
