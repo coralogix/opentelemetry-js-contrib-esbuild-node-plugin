@@ -599,7 +599,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       },
       true
     );
-    if (trace.getSpan(extractedContext)?.spanContext()) {
+    if (extractedContext && trace.getSpan(extractedContext)?.spanContext()) {
       return extractedContext;
     }
     if (!parent) {
