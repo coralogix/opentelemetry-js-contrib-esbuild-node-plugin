@@ -17,6 +17,7 @@
 import { SpanOptions } from '@opentelemetry/api/build/src/trace/SpanOptions';
 import { Span } from '@opentelemetry/api';
 import { TriggerOrigin } from './index';
+import { AwsLambdaInstrumentationConfig } from '../types';
 
 export type TriggerValidator<T> = (event: any) => event is T;
 export interface TriggerSpanInitializerResult {
@@ -27,7 +28,7 @@ export interface TriggerSpanInitializerResult {
 export type TriggerSpanInitializer<T> = (
   event: T
 ) => TriggerSpanInitializerResult;
-export type SpanFinalizer = (span: Span, response?: any) => void;
+export type SpanFinalizer = (span: Span, response?: any, config?: AwsLambdaInstrumentationConfig) => void;
 
 export interface LambdaTrigger<T> {
   validator: TriggerValidator<T>;

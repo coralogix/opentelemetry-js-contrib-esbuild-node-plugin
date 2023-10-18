@@ -25,6 +25,7 @@ import { EventBridgeTrigger } from './event-bridge';
 import { DynamoDBTrigger } from './dynamodb-stream';
 import { Span } from '@opentelemetry/api';
 import { CloudWatchLogsTrigger } from './cloudwatch-logs';
+import { AwsLambdaInstrumentationConfig } from '../types';
 
 export const LambdaAttributes = {
   TRIGGER_SERVICE: 'faas.trigger.type',
@@ -86,12 +87,13 @@ export const getEventTrigger = (
 };
 
 export const finalizeSpan = (
+  config: AwsLambdaInstrumentationConfig,
   origin: TriggerOrigin,
   triggerSpan: Span,
-  response: any
+  response: any,
 ) => {
   const trigger = lambdaTriggers[origin];
   if (trigger.finalizer) {
-    trigger.finalizer(triggerSpan, response);
+    trigger.finalizer(triggerSpan, response, config);
   }
 };

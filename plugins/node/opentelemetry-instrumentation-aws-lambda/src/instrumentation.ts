@@ -250,6 +250,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
             // the handler happened to both call the callback and complete a returned Promise, whichever happens first will
             // win and the latter will be ignored.
             const wrappedCallback = plugin._wrapCallback(
+              config,
               callback,
               lambdaSpan,
               triggerSpan
@@ -309,13 +310,13 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
                   value => {
                     strict(triggerSpan);
 
-                    void plugin._endWrapperSpan(triggerSpan, value, undefined);
+                    void plugin._endWrapperSpan(config, triggerSpan, value, undefined);
 
                     return value;
                   },
                   async error => {
                     strict(triggerSpan);
-                    await plugin._endWrapperSpan(triggerSpan, undefined, error);
+                    await plugin._endWrapperSpan(config, triggerSpan, undefined, error);
                     throw error; // We don't want the instrumentation to hide the error from AWS
                   }
                 );
@@ -325,6 +326,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
 
                 //if (hasLambdaSynchronouslyThrown) {
                 void plugin._endWrapperSpan(
+                  config,
                   triggerSpan,
                   innerResult,
                   undefined
@@ -338,7 +340,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
             error => {
               if (error) {
                 strict(triggerSpan);
-                void plugin._endWrapperSpan(triggerSpan, undefined, error);
+                void plugin._endWrapperSpan(config, triggerSpan, undefined, error);
                 void plugin._flush();
               }
             }
@@ -389,9 +391,10 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
   }
 
   private async _endWrapperSpan(
+    config: AwsLambdaInstrumentationConfig,
     span: Span,
     lambdaResponse: any,
-    errorFromLambda: string | Error | null | undefined
+    errorFromLambda: string | Error | null | undefined,
   ) {
     if (errorFromLambda) {
       span.recordException(errorFromLambda);
@@ -411,12 +414,13 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
         this.triggerOrigin
       )
     ) {
-      finalizeSpan(this.triggerOrigin, span, lambdaResponse);
+      finalizeSpan(config, this.triggerOrigin, span, lambdaResponse);
     }
     span.end();
   }
 
   private _wrapCallback(
+    config: AwsLambdaInstrumentationConfig,
     originalAWSLambdaCallback: Callback,
     span: Span,
     wrapperSpan?: Span
@@ -428,7 +432,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
 
       plugin._endSpan(span, err);
       if (wrapperSpan) {
-        void plugin._endWrapperSpan(wrapperSpan, res, err);
+        void plugin._endWrapperSpan(config, wrapperSpan, res, err);
       }
 
       void this._flush().then(() => {
