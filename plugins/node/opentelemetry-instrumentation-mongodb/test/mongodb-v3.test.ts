@@ -27,9 +27,8 @@ import {
 } from '@opentelemetry/contrib-test-utils';
 import { lookup } from 'dns';
 
-const instrumentation = registerInstrumentationTesting(
-  new MongoDBInstrumentation()
-);
+// @ts-ignore
+const instrumentation = registerInstrumentationTesting(new MongoDBInstrumentation());
 
 import * as mongodb from 'mongodb';
 import { assertSpans, accessCollection, DEFAULT_MONGO_HOST } from './utils';

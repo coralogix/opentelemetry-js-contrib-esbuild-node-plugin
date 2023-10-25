@@ -841,7 +841,7 @@ export class MongoDBInstrumentation extends InstrumentationBase {
     const instrumentation = this;
     return function patchedEnd(this: {}, ...args: unknown[]) {
       const error = args[0];
-      if (span) {
+      if (span && span.isRecording()) {
         if (error instanceof Error) {
           span?.setStatus({
             code: SpanStatusCode.ERROR,
