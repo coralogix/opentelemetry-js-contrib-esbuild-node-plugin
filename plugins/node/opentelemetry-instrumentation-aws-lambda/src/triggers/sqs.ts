@@ -22,7 +22,7 @@ import {
   trace,
 } from '@opentelemetry/api';
 import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
-import { context as otelContext } from '@opentelemetry/api/build/src/context-api';
+import { context as otelContext } from '@opentelemetry/api';
 import {
   AWSXRAY_TRACE_ID_HEADER,
   AWSXRayPropagator,
