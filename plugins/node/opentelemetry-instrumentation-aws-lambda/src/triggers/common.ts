@@ -14,8 +14,7 @@
  * limitations under the License.
  */
 
-import { SpanOptions } from '@opentelemetry/api/build/src/trace/SpanOptions';
-import { Span } from '@opentelemetry/api';
+import { Span, SpanOptions } from '@opentelemetry/api';
 import { TriggerOrigin } from './index';
 import { AwsLambdaInstrumentationConfig } from '../types';
 

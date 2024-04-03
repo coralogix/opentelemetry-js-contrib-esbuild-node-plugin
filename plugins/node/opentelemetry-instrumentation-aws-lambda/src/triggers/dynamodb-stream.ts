@@ -21,8 +21,7 @@ import {
 } from './common';
 import { isDefined } from '../utils';
 import { Attributes, SpanKind } from '@opentelemetry/api';
-import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
-import { DbSystemValues } from '@opentelemetry/semantic-conventions/build/src/trace/SemanticAttributes';
+import { DBSYSTEMVALUES_DYNAMODB, SemanticAttributes } from '@opentelemetry/semantic-conventions';
 import { TriggerOrigin } from './index';
 
 export const isDynamoDBStreamEvent =
@@ -60,7 +59,7 @@ function initalizeDynamoDBStreamSpan(
   );
 
   const attributes: Attributes = {
-    [SemanticAttributes.DB_SYSTEM]: DbSystemValues.DYNAMODB,
+    [SemanticAttributes.DB_SYSTEM]: DBSYSTEMVALUES_DYNAMODB,
   };
 
   if (tableNames.length > 0) {

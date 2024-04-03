@@ -18,15 +18,15 @@ import {
   Attributes,
   Link,
   SpanKind,
+  SpanOptions,
+  defaultTextMapGetter,
   diag,
   propagation,
   trace,
+  context as otelContext,
 } from '@opentelemetry/api';
 import { LambdaTrigger, TriggerSpanInitializerResult } from './common';
 import { TriggerOrigin } from './index';
-import { SpanOptions } from '@opentelemetry/api/build/src/trace/SpanOptions';
-import { context as otelContext } from '@opentelemetry/api/build/src/context-api';
-import { defaultTextMapGetter } from '@opentelemetry/api/build/src/propagation/TextMapPropagator';
 
 export const CONTEXT_KEY = '_context';
 type EventBridgeDetailWithContext = { [CONTEXT_KEY]?: object } & object;
