@@ -33,9 +33,11 @@ import {
 // Get instrumentation (singleton)
 let instrumentation: MongoDBInstrumentation;
 {
+  // @ts-ignore
   const instance: MongoDBInstrumentation | undefined = getInstrumentation();
   if (!instance) {
     instrumentation = new MongoDBInstrumentation();
+    // @ts-ignore
     registerInstrumentationTesting(instrumentation);
   } else {
     instrumentation = instance;

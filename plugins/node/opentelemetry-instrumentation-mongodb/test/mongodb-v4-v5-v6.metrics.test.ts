@@ -39,9 +39,8 @@ const metricReader = new PeriodicExportingMetricReader({
 });
 
 import { registerInstrumentationTesting } from '@opentelemetry/contrib-test-utils';
-const instrumentation = registerInstrumentationTesting(
-  new MongoDBInstrumentation()
-);
+// @ts-ignore
+const instrumentation = registerInstrumentationTesting(new MongoDBInstrumentation());
 
 import { accessCollection, DEFAULT_MONGO_HOST } from './utils';
 import * as mongodb from 'mongodb';

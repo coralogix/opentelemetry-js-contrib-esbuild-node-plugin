@@ -29,9 +29,8 @@ import {
   resetMemoryExporter,
 } from '@opentelemetry/contrib-test-utils';
 
-const instrumentation = registerInstrumentationTesting(
-  new MongoDBInstrumentation()
-);
+// @ts-ignore
+const instrumentation = registerInstrumentationTesting(new MongoDBInstrumentation());
 
 import * as mongodb from 'mongodb';
 import { assertSpans, accessCollection, DEFAULT_MONGO_HOST } from './utils';

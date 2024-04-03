@@ -1,5 +1,5 @@
 {
-  "name": "@opentelemetry/instrumentation-aws-lambda",
+  "name": "@coralogix/instrumentation-aws-lambda",
   "version": "0.39.0",
   "description": "OpenTelemetry AWS Lambda automatic instrumentation package.",
   "main": "build/src/index.js",
@@ -11,7 +11,7 @@
     "clean": "rimraf build/*",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
-    "precompile": "tsc --version && lerna run version:update --scope @opentelemetry/instrumentation-aws-lambda --include-dependencies",
+    "precompile": "tsc --version && lerna run version:update --scope @coralogix/instrumentation-aws-lambda --include-dependencies",
     "prewatch": "npm run precompile",
     "prepublishOnly": "npm run compile",
     "version:update": "node ../../../scripts/version-update.js",

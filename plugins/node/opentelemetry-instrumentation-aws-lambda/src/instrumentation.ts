@@ -28,16 +28,16 @@ import {
   Context as OtelContext,
   context as otelContext,
   diag,
-  trace,
   propagation,
+  ROOT_CONTEXT,
   MeterProvider,
   Span,
   SpanKind,
   SpanStatusCode,
   TextMapGetter,
+  trace,
   TraceFlags,
   TracerProvider,
-  ROOT_CONTEXT,
 } from '@opentelemetry/api';
 import {
   AWSXRAY_TRACE_ID_HEADER,
@@ -59,7 +59,13 @@ import { AwsLambdaInstrumentationConfig, EventContextExtractor } from './types';
 import { VERSION } from './version';
 import { env } from 'process';
 import { LambdaModule } from './internal-types';
-
+import { strict } from 'assert';
+import {
+  finalizeSpan,
+  getEventTrigger,
+  LambdaAttributes,
+  TriggerOrigin,
+} from './triggers';
 const awsPropagator = new AWSXRayPropagator();
 const headerGetter: TextMapGetter<APIGatewayProxyEventHeaders> = {
   keys(carrier): string[] {
@@ -71,8 +77,10 @@ const headerGetter: TextMapGetter<APIGatewayProxyEventHeaders> = {
 };
 
 export const traceContextEnvironmentKey = '_X_AMZN_TRACE_ID';
+export const xForwardProto = 'X-Forwarded-Proto';
 
 export class AwsLambdaInstrumentation extends InstrumentationBase {
+  private triggerOrigin: TriggerOrigin | undefined;
   private _traceForceFlusher?: () => Promise<void>;
   private _metricForceFlusher?: () => Promise<void>;
 
@@ -138,6 +146,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     });
 
     return [
+      // This approach works when the handler is part of the function source code
       new InstrumentationNodeModuleDefinition(
         // NB: The patching infrastructure seems to match names backwards, this must be the filename, while
         // InstrumentationNodeModuleFile must be the module name.
@@ -164,6 +173,24 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
             }
           ),
         ]
+      ),
+      // This approach works when the handler is part of lambda layer
+      new InstrumentationNodeModuleDefinition(
+        module,
+        ['*'],
+        (moduleExports: LambdaModule) => {
+          diag.debug('Applying patch for lambda handler');
+          if (isWrapped(moduleExports[functionName])) {
+            this._unwrap(moduleExports, functionName);
+          }
+          this._wrap(moduleExports, functionName, this._getHandler());
+          return moduleExports;
+        },
+        (moduleExports?: LambdaModule) => {
+          if (moduleExports === undefined) return;
+          diag.debug('Removing patch for lambda handler');
+          this._unwrap(moduleExports, functionName);
+        }
       ),
     ];
   }
@@ -196,68 +223,287 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       );
 
       const name = context.functionName;
-      const span = plugin.tracer.startSpan(
-        name,
-        {
-          kind: SpanKind.SERVER,
-          attributes: {
-            [SemanticAttributes.FAAS_EXECUTION]: context.awsRequestId,
-            [SemanticResourceAttributes.FAAS_ID]: context.invokedFunctionArn,
-            [SemanticResourceAttributes.CLOUD_ACCOUNT_ID]:
-              AwsLambdaInstrumentation._extractAccountId(
-                context.invokedFunctionArn
-              ),
-          },
-        },
-        parent
-      );
 
-      if (config.requestHook) {
-        safeExecuteInTheMiddle(
-          () => config.requestHook!(span, { event, context }),
-          e => {
-            if (e)
-              diag.error('aws-lambda instrumentation: requestHook error', e);
+      const { triggerSpan, triggerOrigin } =
+        AwsLambdaInstrumentation._getTriggerSpan(plugin, event, parent) ?? {};
+      plugin.triggerOrigin = triggerOrigin;
+
+      const inner = (otelContextInstance: OtelContext) => {
+        const lambdaSpan = plugin.tracer.startSpan(
+          name,
+          {
+            kind: SpanKind.SERVER,
+            attributes: {
+              [SemanticAttributes.FAAS_EXECUTION]: context.awsRequestId,
+              [SemanticResourceAttributes.FAAS_ID]: context.invokedFunctionArn,
+              [SemanticResourceAttributes.CLOUD_ACCOUNT_ID]:
+                AwsLambdaInstrumentation._extractAccountId(
+                  context.invokedFunctionArn
+                ),
+            },
           },
-          true
+          otelContextInstance
+        );
+
+        if (config.requestHook) {
+          safeExecuteInTheMiddle(
+            () => config.requestHook!(lambdaSpan, { event, context }),
+            e => {
+              if (e)
+                diag.error('aws-lambda instrumentation: requestHook error', e);
+            },
+            true
+          );
+        }
+
+        return otelContext.with(
+          trace.setSpan(otelContextInstance, lambdaSpan),
+          () => {
+            // Lambda seems to pass a callback even if handler is of Promise form, so we wrap all the time before calling
+            // the handler and see if the result is a Promise or not. In such a case, the callback is usually ignored. If
+            // the handler happened to both call the callback and complete a returned Promise, whichever happens first will
+            // win and the latter will be ignored.
+            const wrappedCallback = plugin._wrapCallback(
+              config,
+              callback,
+              lambdaSpan,
+              triggerSpan
+            );
+
+            const maybePromise = safeExecuteInTheMiddle(
+              () => original.apply(this, [event, context, wrappedCallback]),
+              error => {
+                if (error != null) {
+                  // Exception thrown synchronously before resolving callback / promise.
+                  // Callback may or may not have been called, we can't know for sure, but it doesn't matter, both will end the current span
+                  plugin._applyResponseHook(lambdaSpan, error);
+                  plugin._endSpan(lambdaSpan, error);
+                }
+              }
+            ) as Promise<{}> | undefined;
+            if (typeof maybePromise?.then === 'function') {
+              return maybePromise.then(
+                value => {
+                  plugin._applyResponseHook(lambdaSpan, null, value);
+                  plugin._endSpan(lambdaSpan, undefined);
+                  return value;
+                },
+                (err: Error | string) => {
+                  plugin._applyResponseHook(lambdaSpan, err);
+
+                  plugin._endSpan(lambdaSpan, err);
+                  throw err;
+                }
+              );
+            }
+            return maybePromise;
+          }
+        );
+      };
+
+      let handlerReturn: Promise<any> | undefined;
+      if (!triggerSpan) {
+        // No wrapper span
+        try {
+          handlerReturn = inner(parent);
+        } catch (e) {
+          // Catching a lambda that synchronously failed
+
+          void plugin._flush();
+          throw e;
+        }
+      } else {
+        const subCtx = trace.setSpan(parent, triggerSpan);
+        handlerReturn = otelContext.with(subCtx, () => {
+          return safeExecuteInTheMiddle(
+            () => {
+              const innerResult = inner(subCtx); // This call never fails, because it either returns a promise, or was called with safeExecuteInTheMiddle
+              // The handler was an async, it returned a promise.
+              if (typeof innerResult?.then === 'function') {
+                return innerResult.then(
+                  value => {
+                    strict(triggerSpan);
+
+                    void plugin._endWrapperSpan(config, triggerSpan, value, undefined);
+
+                    return value;
+                  },
+                  async error => {
+                    strict(triggerSpan);
+                    await plugin._endWrapperSpan(config, triggerSpan, undefined, error);
+                    throw error; // We don't want the instrumentation to hide the error from AWS
+                  }
+                );
+              } else {
+                // The lambda was synchronous, or it as synchronously thrown an error
+                strict(triggerSpan);
+
+                //if (hasLambdaSynchronouslyThrown) {
+                void plugin._endWrapperSpan(
+                  config,
+                  triggerSpan,
+                  innerResult,
+                  undefined
+                );
+                // }
+                // Fallthrough: sync reply, but callback may be in use. No way to query the event loop !
+              }
+
+              return innerResult;
+            },
+            error => {
+              if (error) {
+                strict(triggerSpan);
+                void plugin._endWrapperSpan(config, triggerSpan, undefined, error);
+                void plugin._flush();
+              }
+            }
+          );
+        });
+      }
+
+      // Second case, lambda was asynchronous, in which case
+      if (typeof handlerReturn?.then === 'function') {
+        return handlerReturn.then(
+          async success => {
+            await plugin._flush();
+            return success;
+          },
+          async error => {
+            await plugin._flush();
+            throw error;
+          }
         );
       }
 
-      return otelContext.with(trace.setSpan(parent, span), () => {
-        // Lambda seems to pass a callback even if handler is of Promise form, so we wrap all the time before calling
-        // the handler and see if the result is a Promise or not. In such a case, the callback is usually ignored. If
-        // the handler happened to both call the callback and complete a returned Promise, whichever happens first will
-        // win and the latter will be ignored.
-        const wrappedCallback = plugin._wrapCallback(callback, span);
-        const maybePromise = safeExecuteInTheMiddle(
-          () => original.apply(this, [event, context, wrappedCallback]),
-          error => {
-            if (error != null) {
-              // Exception thrown synchronously before resolving callback / promise.
-              plugin._applyResponseHook(span, error);
-              plugin._endSpan(span, error, () => {});
-            }
-          }
-        ) as Promise<{}> | undefined;
-        if (typeof maybePromise?.then === 'function') {
-          return maybePromise.then(
-            value => {
-              plugin._applyResponseHook(span, null, value);
-              return new Promise(resolve =>
-                plugin._endSpan(span, undefined, () => resolve(value))
-              );
-            },
-            (err: Error | string) => {
-              plugin._applyResponseHook(span, err);
-              return new Promise((resolve, reject) =>
-                plugin._endSpan(span, err, () => reject(err))
-              );
-            }
-          );
-        }
-        return maybePromise;
+      // Third case, the lambda is purely synchronous, without event loop, nor callback() being called
+      // Pitfall, no flushing !
+      // We can't know for sure if the event loop is empty or not, so we can't know if we should flush or not.
+      return handlerReturn;
+    };
+  }
+
+  private static _getTriggerSpan(
+    plugin: AwsLambdaInstrumentation,
+    event: unknown,
+    parentContext: OtelContext
+  ): { triggerOrigin: TriggerOrigin; triggerSpan: Span } | undefined {
+    if (plugin._config.detectTrigger === false) {
+      return undefined;
+    }
+    const trigger = getEventTrigger(event);
+    if (!trigger) {
+      return undefined;
+    }
+    const { name, options, origin } = trigger;
+    if (!options.attributes) {
+      options.attributes = {};
+    }
+    options.attributes[LambdaAttributes.TRIGGER_SERVICE] = origin;
+    const triggerSpan = plugin.tracer.startSpan(name, options, parentContext);
+    return { triggerOrigin: origin, triggerSpan };
+  }
+
+  private async _endWrapperSpan(
+    config: AwsLambdaInstrumentationConfig,
+    span: Span,
+    lambdaResponse: any,
+    errorFromLambda: string | Error | null | undefined,
+  ) {
+    if (errorFromLambda) {
+      span.recordException(errorFromLambda);
+
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: this._errorToString(errorFromLambda),
+      });
+
+      span.end();
+      return;
+    }
+
+    if (
+      this.triggerOrigin !== undefined &&
+      [TriggerOrigin.API_GATEWAY_REST, TriggerOrigin.API_GATEWAY_HTTP].includes(
+        this.triggerOrigin
+      )
+    ) {
+      finalizeSpan(config, this.triggerOrigin, span, lambdaResponse);
+    }
+    span.end();
+  }
+
+  private _wrapCallback(
+    config: AwsLambdaInstrumentationConfig,
+    originalAWSLambdaCallback: Callback,
+    span: Span,
+    wrapperSpan?: Span
+  ): Callback {
+    const plugin = this;
+    return (err, res) => {
+      diag.debug('executing wrapped lookup callback function');
+      plugin._applyResponseHook(span, err, res);
+
+      plugin._endSpan(span, err);
+      if (wrapperSpan) {
+        void plugin._endWrapperSpan(config, wrapperSpan, res, err);
+      }
+
+      void this._flush().then(() => {
+        diag.debug('executing original lookup callback function');
+        originalAWSLambdaCallback.apply(this, [err, res]); // End of the function
       });
     };
+  }
+
+  private async _flush() {
+    const flushers = [];
+    if (this._traceForceFlusher) {
+      flushers.push(this._traceForceFlusher());
+    } else {
+      diag.error(
+        'Spans may not be exported for the lambda function because we are not force flushing before callback.'
+      );
+    }
+    if (this._metricForceFlusher) {
+      flushers.push(this._metricForceFlusher());
+    } else {
+      diag.error(
+        'Metrics may not be exported for the lambda function because we are not force flushing before callback.'
+      );
+    }
+
+    try {
+      await Promise.all(flushers);
+    } catch (e) {
+      // We must not fail this call, but we may log it
+      diag.error('Error while flushing the lambda', e);
+    }
+  }
+
+  private _endSpan(span: Span, err: string | Error | null | undefined) {
+    if (err) {
+      span.recordException(err);
+    }
+
+    const errMessage = this._errorToString(err);
+    if (errMessage) {
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: errMessage,
+      });
+    }
+    span.end();
+  }
+
+  private _errorToString(err: string | Error | null | undefined) {
+    let errMessage;
+    if (typeof err === 'string') {
+      errMessage = err;
+    } else if (err) {
+      errMessage = err.message;
+    }
+    return errMessage;
   }
 
   override setTracerProvider(tracerProvider: TracerProvider) {
@@ -298,62 +544,6 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     }
 
     return undefined;
-  }
-
-  private _wrapCallback(original: Callback, span: Span): Callback {
-    const plugin = this;
-    return function wrappedCallback(this: never, err, res) {
-      diag.debug('executing wrapped lookup callback function');
-      plugin._applyResponseHook(span, err, res);
-
-      plugin._endSpan(span, err, () => {
-        diag.debug('executing original lookup callback function');
-        return original.apply(this, [err, res]);
-      });
-    };
-  }
-
-  private _endSpan(
-    span: Span,
-    err: string | Error | null | undefined,
-    callback: () => void
-  ) {
-    if (err) {
-      span.recordException(err);
-    }
-
-    let errMessage;
-    if (typeof err === 'string') {
-      errMessage = err;
-    } else if (err) {
-      errMessage = err.message;
-    }
-    if (errMessage) {
-      span.setStatus({
-        code: SpanStatusCode.ERROR,
-        message: errMessage,
-      });
-    }
-
-    span.end();
-
-    const flushers = [];
-    if (this._traceForceFlusher) {
-      flushers.push(this._traceForceFlusher());
-    } else {
-      diag.error(
-        'Spans may not be exported for the lambda function because we are not force flushing before callback.'
-      );
-    }
-    if (this._metricForceFlusher) {
-      flushers.push(this._metricForceFlusher());
-    } else {
-      diag.error(
-        'Metrics may not be exported for the lambda function because we are not force flushing before callback.'
-      );
-    }
-
-    Promise.all(flushers).then(callback, callback);
   }
 
   private _applyResponseHook(
@@ -427,7 +617,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       },
       true
     );
-    if (trace.getSpan(extractedContext)?.spanContext()) {
+    if (extractedContext && trace.getSpan(extractedContext)?.spanContext()) {
       return extractedContext;
     }
     if (!parent) {

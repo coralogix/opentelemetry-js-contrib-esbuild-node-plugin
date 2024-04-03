@@ -52,7 +52,7 @@ import { W3CTraceContextPropagator } from '@opentelemetry/core';
 
 const memoryExporter = new InMemorySpanExporter();
 
-const assertSpanSuccess = (span: ReadableSpan) => {
+export const assertSpanSuccess = (span: ReadableSpan) => {
   assert.strictEqual(span.kind, SpanKind.SERVER);
   assert.strictEqual(span.name, 'my_function');
   assert.strictEqual(
@@ -64,7 +64,7 @@ const assertSpanSuccess = (span: ReadableSpan) => {
   assert.strictEqual(span.status.message, undefined);
 };
 
-const assertSpanFailure = (span: ReadableSpan) => {
+export const assertSpanFailure = (span: ReadableSpan) => {
   assert.strictEqual(span.kind, SpanKind.SERVER);
   assert.strictEqual(span.name, 'my_function');
   assert.strictEqual(
