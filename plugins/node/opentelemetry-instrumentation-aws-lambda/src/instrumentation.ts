@@ -123,15 +123,23 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
 
     // Lambda loads user function using an absolute path.
     let filename = path.resolve(taskRoot, moduleRoot, module);
-    if (!filename.endsWith('.js')) {
-      // its impossible to know in advance if the user has a cjs or js file.
-      // check that the .js file exists otherwise fallback to next known possibility
+    if (!filename.includes('.')) {
+      // The filename has no extension, we need to check if there is a .js, .cjs or .mjs file
       try {
         fs.statSync(`${filename}.js`);
         filename += '.js';
       } catch (e) {
-        // fallback to .cjs
-        filename += '.cjs';
+        try {
+          fs.statSync(`${filename}.cjs`);
+          filename += '.cjs';
+        } catch (e) {
+          try {
+            fs.statSync(`${filename}.mjs`);
+            filename += '.mjs';
+          } catch (e) {
+            diag.warn(`AwsLambdaInstrumentation couldn't find the handler file: ${filename}`);
+          }
+        }
       }
     }
 
@@ -177,6 +185,24 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       // This approach works when the handler is part of lambda layer
       new InstrumentationNodeModuleDefinition(
         module,
+        ['*'],
+        (moduleExports: LambdaModule) => {
+          diag.debug('Applying patch for lambda handler');
+          if (isWrapped(moduleExports[functionName])) {
+            this._unwrap(moduleExports, functionName);
+          }
+          this._wrap(moduleExports, functionName, this._getHandler());
+          return moduleExports;
+        },
+        (moduleExports?: LambdaModule) => {
+          if (moduleExports === undefined) return;
+          diag.debug('Removing patch for lambda handler');
+          this._unwrap(moduleExports, functionName);
+        }
+      ),
+      // This approach works when the handler is an .mjs file in the function source code
+      new InstrumentationNodeModuleDefinition(
+        filename,
         ['*'],
         (moduleExports: LambdaModule) => {
           diag.debug('Applying patch for lambda handler');
