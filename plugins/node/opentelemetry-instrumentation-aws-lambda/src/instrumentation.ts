@@ -436,27 +436,31 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     lambdaResponse: any,
     errorFromLambda: string | Error | null | undefined,
   ) {
-    if (errorFromLambda) {
-      span.recordException(errorFromLambda);
+    if (span.isRecording()) {
+      if (errorFromLambda) {
+        span.recordException(errorFromLambda);
 
-      span.setStatus({
-        code: SpanStatusCode.ERROR,
-        message: this._errorToString(errorFromLambda),
-      });
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: this._errorToString(errorFromLambda),
+        });
 
+        span.end();
+        return;
+      }
+
+      if (
+        this.triggerOrigin !== undefined &&
+        [TriggerOrigin.API_GATEWAY_REST, TriggerOrigin.API_GATEWAY_HTTP].includes(
+          this.triggerOrigin
+        )
+      ) {
+        finalizeSpan(config, this.triggerOrigin, span, lambdaResponse);
+      }
       span.end();
-      return;
+    } else {
+      diag.debug('Ending wrapper span for the second time');
     }
-
-    if (
-      this.triggerOrigin !== undefined &&
-      [TriggerOrigin.API_GATEWAY_REST, TriggerOrigin.API_GATEWAY_HTTP].includes(
-        this.triggerOrigin
-      )
-    ) {
-      finalizeSpan(config, this.triggerOrigin, span, lambdaResponse);
-    }
-    span.end();
   }
 
   private _wrapCallback(
@@ -508,18 +512,22 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
   }
 
   private _endSpan(span: Span, err: string | Error | null | undefined) {
-    if (err) {
-      span.recordException(err);
-    }
+    if (span.isRecording()) {
+      if (err) {
+        span.recordException(err);
+      }
 
-    const errMessage = this._errorToString(err);
-    if (errMessage) {
-      span.setStatus({
-        code: SpanStatusCode.ERROR,
-        message: errMessage,
-      });
+      const errMessage = this._errorToString(err);
+      if (errMessage) {
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: errMessage,
+        });
+      }
+      span.end();
+    } else {
+      diag.debug('Ending span for the second time');
     }
-    span.end();
   }
 
   private _errorToString(err: string | Error | null | undefined) {
