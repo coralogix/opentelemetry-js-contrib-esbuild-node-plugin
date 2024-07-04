@@ -14,14 +14,8 @@
  * limitations under the License.
  */
 
-import * as path from 'path';
-import * as fs from 'fs';
-
 import {
   InstrumentationBase,
-  InstrumentationNodeModuleDefinition,
-  InstrumentationNodeModuleFile,
-  isWrapped,
   safeExecuteInTheMiddle,
 } from '@opentelemetry/instrumentation';
 import {
@@ -58,7 +52,6 @@ import {
 import { AwsLambdaInstrumentationConfig, EventContextExtractor } from './types';
 import { VERSION } from './version';
 import { env } from 'process';
-import { LambdaModule } from './internal-types';
 import { strict } from 'assert';
 import {
   finalizeSpan,
@@ -66,6 +59,9 @@ import {
   LambdaAttributes,
   TriggerOrigin,
 } from './triggers';
+
+diag.debug("Loading AwsLambdaInstrumentation")
+
 const awsPropagator = new AWSXRayPropagator();
 const headerGetter: TextMapGetter<APIGatewayProxyEventHeaders> = {
   keys(carrier): string[] {
@@ -104,130 +100,10 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
   }
 
   init() {
-    const taskRoot = process.env.LAMBDA_TASK_ROOT;
-    const handlerDef = this._config.lambdaHandler ?? process.env._HANDLER;
-
-    // _HANDLER and LAMBDA_TASK_ROOT are always defined in Lambda but guard bail out if in the future this changes.
-    if (!taskRoot || !handlerDef) {
-      this._diag.debug(
-        'Skipping lambda instrumentation: no _HANDLER/lambdaHandler or LAMBDA_TASK_ROOT.',
-        { taskRoot, handlerDef }
-      );
-      return [];
-    }
-
-    const handler = path.basename(handlerDef);
-    const moduleRoot = handlerDef.substr(0, handlerDef.length - handler.length);
-
-    const [module, functionName] = handler.split('.', 2);
-
-    // Lambda loads user function using an absolute path.
-    let filename = path.resolve(taskRoot, moduleRoot, module);
-    if (!filename.includes('.')) {
-      // The filename has no extension, we need to check if there is a .js, .cjs or .mjs file
-      try {
-        fs.statSync(`${filename}.js`);
-        filename += '.js';
-      } catch (e) {
-        try {
-          fs.statSync(`${filename}.cjs`);
-          filename += '.cjs';
-        } catch (e) {
-          try {
-            fs.statSync(`${filename}.mjs`);
-            filename += '.mjs';
-          } catch (e) {
-            diag.warn(`AwsLambdaInstrumentation couldn't find the handler file: ${filename}`);
-          }
-        }
-      }
-    }
-
-    diag.debug('Instrumenting lambda handler', {
-      taskRoot,
-      handlerDef,
-      handler,
-      moduleRoot,
-      module,
-      filename,
-      functionName,
-    });
-
-    return [
-      // This approach works when the handler is part of the function source code
-      new InstrumentationNodeModuleDefinition(
-        // NB: The patching infrastructure seems to match names backwards, this must be the filename, while
-        // InstrumentationNodeModuleFile must be the module name.
-        filename,
-        ['*'],
-        undefined,
-        undefined,
-        [
-          new InstrumentationNodeModuleFile(
-            module,
-            ['*'],
-            (moduleExports: LambdaModule) => {
-              diag.debug('Applying patch for lambda handler');
-              if (isWrapped(moduleExports[functionName])) {
-                this._unwrap(moduleExports, functionName);
-              }
-              this._wrap(moduleExports, functionName, this._getHandler());
-              return moduleExports;
-            },
-            (moduleExports?: LambdaModule) => {
-              if (moduleExports == null) return;
-              diag.debug('Removing patch for lambda handler');
-              this._unwrap(moduleExports, functionName);
-            }
-          ),
-        ]
-      ),
-      // This approach works when the handler is part of lambda layer
-      new InstrumentationNodeModuleDefinition(
-        module,
-        ['*'],
-        (moduleExports: LambdaModule) => {
-          diag.debug('Applying patch for lambda handler');
-          if (isWrapped(moduleExports[functionName])) {
-            this._unwrap(moduleExports, functionName);
-          }
-          this._wrap(moduleExports, functionName, this._getHandler());
-          return moduleExports;
-        },
-        (moduleExports?: LambdaModule) => {
-          if (moduleExports === undefined) return;
-          diag.debug('Removing patch for lambda handler');
-          this._unwrap(moduleExports, functionName);
-        }
-      ),
-      // This approach works when the handler is an .mjs file in the function source code
-      new InstrumentationNodeModuleDefinition(
-        filename,
-        ['*'],
-        (moduleExports: LambdaModule) => {
-          diag.debug('Applying patch for lambda handler');
-          if (isWrapped(moduleExports[functionName])) {
-            this._unwrap(moduleExports, functionName);
-          }
-          this._wrap(moduleExports, functionName, this._getHandler());
-          return moduleExports;
-        },
-        (moduleExports?: LambdaModule) => {
-          if (moduleExports === undefined) return;
-          diag.debug('Removing patch for lambda handler');
-          this._unwrap(moduleExports, functionName);
-        }
-      ),
-    ];
+    return [];
   }
 
-  private _getHandler() {
-    return (original: Handler) => {
-      return this._getPatchHandler(original);
-    };
-  }
-
-  private _getPatchHandler(original: Handler) {
+  public getPatchHandler(original: Handler): Handler {
     diag.debug('patch handler function');
     const plugin = this;
 
