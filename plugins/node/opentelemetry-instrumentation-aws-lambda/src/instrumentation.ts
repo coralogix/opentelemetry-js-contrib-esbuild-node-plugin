@@ -59,6 +59,7 @@ import {
   LambdaAttributes,
   TriggerOrigin,
 } from './triggers';
+import { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 
 diag.debug("Loading AwsLambdaInstrumentation")
 
@@ -74,6 +75,10 @@ const headerGetter: TextMapGetter<APIGatewayProxyEventHeaders> = {
 
 export const traceContextEnvironmentKey = '_X_AMZN_TRACE_ID';
 export const xForwardProto = 'X-Forwarded-Proto';
+const SPAN_STATE_ATTRIBUTE = 'cx.internal.span.state';
+const TRACE_ID_ATTRIBUTE = 'cx.internal.trace.id';
+const SPAN_ID_ATTRIBUTE = 'cx.internal.span.id';
+const SPAN_ROLE_ATTRIBUTE = 'cx.internal.span.role';
 
 export class AwsLambdaInstrumentation extends InstrumentationBase {
   private triggerOrigin: TriggerOrigin | undefined;
@@ -142,6 +147,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
                 AwsLambdaInstrumentation._extractAccountId(
                   context.invokedFunctionArn
                 ),
+              [SPAN_ROLE_ATTRIBUTE]: 'invocation',
             },
           },
           otelContextInstance
@@ -157,6 +163,9 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
             true
           );
         }
+
+        // Not awaiting here. This has it's pros: (no extra latency, less complexity). But also cons: no guarantee that it gets delivered before the invocation ends.
+        plugin._sendEarlySpans(triggerSpan, lambdaSpan);
 
         return otelContext.with(
           trace.setSpan(otelContextInstance, lambdaSpan),
@@ -192,7 +201,6 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
                 },
                 (err: Error | string) => {
                   plugin._applyResponseHook(lambdaSpan, err);
-
                   plugin._endSpan(lambdaSpan, err);
                   throw err;
                 }
@@ -285,6 +293,52 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     };
   }
 
+  private async _sendEarlySpans(
+    triggerSpan?: Span,
+    invocationSpan?: Span,
+  ) {
+    if (triggerSpan && ((triggerSpan as unknown as ReadableSpan).kind !== undefined)) {
+      const earlyTrigger = this._createEarlySpan(triggerSpan as unknown as ReadableSpan);
+      earlyTrigger.end();
+    }
+
+    if (invocationSpan && ((invocationSpan as unknown as ReadableSpan).kind !== undefined)) {
+      const earlyTrigger = this._createEarlySpan(invocationSpan as unknown as ReadableSpan);
+      earlyTrigger.end();
+    }
+
+    await this._flush();
+  }
+
+  private _createEarlySpan(
+    span: ReadableSpan
+  ): Span {
+    const earlySpan = this.tracer.startSpan(span.name, {
+      startTime: span.startTime,
+      kind: span.kind,
+      attributes: span.attributes,
+      links: span.links,
+    });
+
+    const attributes = span.attributes;
+    for (const [key, value] of Object.entries(attributes)) {
+      if (value) {
+        earlySpan.setAttribute(key, value);
+      }
+    }
+
+    const events = span.events;
+    for (const event of events) {
+      earlySpan.addEvent(event.name, event.attributes, event.time);
+    }
+
+    earlySpan.setAttribute(SPAN_STATE_ATTRIBUTE, 'early');
+    earlySpan.setAttribute(TRACE_ID_ATTRIBUTE, span.spanContext().traceId);
+    earlySpan.setAttribute(SPAN_ID_ATTRIBUTE, span.spanContext().spanId);
+
+    return earlySpan;
+  }
+
   private static _getTriggerSpan(
     plugin: AwsLambdaInstrumentation,
     event: unknown,
@@ -302,6 +356,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       options.attributes = {};
     }
     options.attributes[LambdaAttributes.TRIGGER_SERVICE] = origin;
+    options.attributes[SPAN_ROLE_ATTRIBUTE] = 'trigger';
     const triggerSpan = plugin.tracer.startSpan(name, options, parentContext);
     return { triggerOrigin: origin, triggerSpan };
   }
@@ -325,12 +380,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
         return;
       }
 
-      if (
-        this.triggerOrigin !== undefined &&
-        [TriggerOrigin.API_GATEWAY_REST, TriggerOrigin.API_GATEWAY_HTTP].includes(
-          this.triggerOrigin
-        )
-      ) {
+      if (this.triggerOrigin) {
         finalizeSpan(config, this.triggerOrigin, span, lambdaResponse);
       }
       span.end();
