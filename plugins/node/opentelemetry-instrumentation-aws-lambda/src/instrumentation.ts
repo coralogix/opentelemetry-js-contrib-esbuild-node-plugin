@@ -121,7 +121,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       callback: Callback
     ) {
       const config = plugin._config;
-      const parent = AwsLambdaInstrumentation._determineParent(
+      const upstreamContext = AwsLambdaInstrumentation._determineParent(
         event,
         context,
         config.disableAwsContextPropagation === true,
@@ -132,11 +132,11 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       const name = context.functionName;
 
       const { triggerSpan, triggerOrigin } =
-        AwsLambdaInstrumentation._getTriggerSpan(plugin, event, parent) ?? {};
+        AwsLambdaInstrumentation._getTriggerSpan(plugin, event, upstreamContext) ?? {};
       plugin.triggerOrigin = triggerOrigin;
 
-      const inner = (otelContextInstance: OtelContext) => {
-        const lambdaSpan = plugin.tracer.startSpan(
+      const inner = (invocationParentContext: OtelContext) => {
+        const invocationSpan = plugin.tracer.startSpan(
           name,
           {
             kind: SpanKind.SERVER,
@@ -150,12 +150,12 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
               [SPAN_ROLE_ATTRIBUTE]: 'invocation',
             },
           },
-          otelContextInstance
+          invocationParentContext
         );
 
         if (config.requestHook) {
           safeExecuteInTheMiddle(
-            () => config.requestHook!(lambdaSpan, { event, context }),
+            () => config.requestHook!(invocationSpan, { event, context }),
             e => {
               if (e)
                 diag.error('aws-lambda instrumentation: requestHook error', e);
@@ -165,10 +165,10 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
         }
 
         // Not awaiting here. This has it's pros: (no extra latency, less complexity). But also cons: no guarantee that it gets delivered before the invocation ends.
-        plugin._sendEarlySpans(triggerSpan, lambdaSpan);
+        plugin._sendEarlySpans(upstreamContext, triggerSpan, invocationParentContext, invocationSpan);
 
         return otelContext.with(
-          trace.setSpan(otelContextInstance, lambdaSpan),
+          trace.setSpan(invocationParentContext, invocationSpan),
           () => {
             // Lambda seems to pass a callback even if handler is of Promise form, so we wrap all the time before calling
             // the handler and see if the result is a Promise or not. In such a case, the callback is usually ignored. If
@@ -177,7 +177,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
             const wrappedCallback = plugin._wrapCallback(
               config,
               callback,
-              lambdaSpan,
+              invocationSpan,
               triggerSpan
             );
 
@@ -187,21 +187,21 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
                 if (error != null) {
                   // Exception thrown synchronously before resolving callback / promise.
                   // Callback may or may not have been called, we can't know for sure, but it doesn't matter, both will end the current span
-                  plugin._applyResponseHook(lambdaSpan, error);
-                  plugin._endSpan(lambdaSpan, error);
+                  plugin._applyResponseHook(invocationSpan, error);
+                  plugin._endSpan(invocationSpan, error);
                 }
               }
             ) as Promise<{}> | undefined;
             if (typeof maybePromise?.then === 'function') {
               return maybePromise.then(
                 value => {
-                  plugin._applyResponseHook(lambdaSpan, null, value);
-                  plugin._endSpan(lambdaSpan, undefined);
+                  plugin._applyResponseHook(invocationSpan, null, value);
+                  plugin._endSpan(invocationSpan, undefined);
                   return value;
                 },
                 (err: Error | string) => {
-                  plugin._applyResponseHook(lambdaSpan, err);
-                  plugin._endSpan(lambdaSpan, err);
+                  plugin._applyResponseHook(invocationSpan, err);
+                  plugin._endSpan(invocationSpan, err);
                   throw err;
                 }
               );
@@ -215,7 +215,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       if (!triggerSpan) {
         // No wrapper span
         try {
-          handlerReturn = inner(parent);
+          handlerReturn = inner(upstreamContext);
         } catch (e) {
           // Catching a lambda that synchronously failed
 
@@ -223,7 +223,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
           throw e;
         }
       } else {
-        const subCtx = trace.setSpan(parent, triggerSpan);
+        const subCtx = trace.setSpan(upstreamContext, triggerSpan);
         handlerReturn = otelContext.with(subCtx, () => {
           return safeExecuteInTheMiddle(
             () => {
@@ -294,16 +294,18 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
   }
 
   private async _sendEarlySpans(
-    triggerSpan?: Span,
-    invocationSpan?: Span,
+    triggerParentContext: OtelContext,
+    triggerSpan: Span | undefined,
+    invocationParentContext: OtelContext,
+    invocationSpan: Span,
   ) {
     if (triggerSpan && ((triggerSpan as unknown as ReadableSpan).kind !== undefined)) {
-      const earlyTrigger = this._createEarlySpan(triggerSpan as unknown as ReadableSpan);
+      const earlyTrigger = this._createEarlySpan(triggerParentContext, triggerSpan as unknown as ReadableSpan);
       earlyTrigger.end();
     }
 
     if (invocationSpan && ((invocationSpan as unknown as ReadableSpan).kind !== undefined)) {
-      const earlyTrigger = this._createEarlySpan(invocationSpan as unknown as ReadableSpan);
+      const earlyTrigger = this._createEarlySpan(invocationParentContext, invocationSpan as unknown as ReadableSpan);
       earlyTrigger.end();
     }
 
@@ -311,14 +313,19 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
   }
 
   private _createEarlySpan(
-    span: ReadableSpan
+    parentContext: OtelContext,
+    span: ReadableSpan,
   ): Span {
-    const earlySpan = this.tracer.startSpan(span.name, {
-      startTime: span.startTime,
-      kind: span.kind,
-      attributes: span.attributes,
-      links: span.links,
-    });
+    const earlySpan = this.tracer.startSpan(
+      span.name, 
+      {
+        startTime: span.startTime,
+        kind: span.kind,
+        attributes: span.attributes,
+        links: span.links,
+      },
+      parentContext
+    );
 
     const attributes = span.attributes;
     for (const [key, value] of Object.entries(attributes)) {
