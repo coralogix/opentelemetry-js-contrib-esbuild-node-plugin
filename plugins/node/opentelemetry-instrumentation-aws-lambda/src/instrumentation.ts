@@ -309,7 +309,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       earlyTrigger.end();
     }
 
-    await this._flush();
+    await this._flush_trace();
   }
 
   private _createEarlySpan(
@@ -420,27 +420,34 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
   }
 
   private async _flush() {
-    const flushers = [];
+    try {
+      await Promise.all([
+        this._flush_trace(),
+        this._flush_metric()
+      ]);
+    } catch (e) {
+      // We must not fail this call, but we may log it
+      diag.error('Error while flushing the lambda', e);
+    }
+  }
+
+  private async _flush_trace() {
     if (this._traceForceFlusher) {
-      flushers.push(this._traceForceFlusher());
+      await this._traceForceFlusher();
     } else {
       diag.error(
         'Spans may not be exported for the lambda function because we are not force flushing before callback.'
       );
     }
+  }
+
+  private async _flush_metric() {
     if (this._metricForceFlusher) {
-      flushers.push(this._metricForceFlusher());
+      await this._metricForceFlusher();
     } else {
       diag.error(
         'Metrics may not be exported for the lambda function because we are not force flushing before callback.'
       );
-    }
-
-    try {
-      await Promise.all(flushers);
-    } catch (e) {
-      // We must not fail this call, but we may log it
-      diag.error('Error while flushing the lambda', e);
     }
   }
 
