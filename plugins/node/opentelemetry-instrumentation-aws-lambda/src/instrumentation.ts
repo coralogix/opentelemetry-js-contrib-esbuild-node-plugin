@@ -293,22 +293,26 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     };
   }
 
+  // never fails
   private async _sendEarlySpans(
     triggerParentContext: OtelContext,
     triggerSpan: Span | undefined,
     invocationParentContext: OtelContext,
     invocationSpan: Span,
   ) {
-    if (triggerSpan && ((triggerSpan as unknown as ReadableSpan).kind !== undefined)) {
-      const earlyTrigger = this._createEarlySpan(triggerParentContext, triggerSpan as unknown as ReadableSpan);
-      earlyTrigger.end();
-    }
+    try {
+      if (triggerSpan && ((triggerSpan as unknown as ReadableSpan).kind !== undefined)) {
+        const earlyTrigger = this._createEarlySpan(triggerParentContext, triggerSpan as unknown as ReadableSpan);
+        earlyTrigger.end();
+      }
 
-    if (invocationSpan && ((invocationSpan as unknown as ReadableSpan).kind !== undefined)) {
-      const earlyTrigger = this._createEarlySpan(invocationParentContext, invocationSpan as unknown as ReadableSpan);
-      earlyTrigger.end();
+      if (invocationSpan && ((invocationSpan as unknown as ReadableSpan).kind !== undefined)) {
+        const earlyTrigger = this._createEarlySpan(invocationParentContext, invocationSpan as unknown as ReadableSpan);
+        earlyTrigger.end();
+      }
+    } catch (e) {
+      diag.warn('Failed to prepare early spans', e);
     }
-
     await this._flush_trace();
   }
 
@@ -415,25 +419,28 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       void this._flush().then(() => {
         diag.debug('executing original lookup callback function');
         originalAWSLambdaCallback.apply(this, [err, res]); // End of the function
-      });
+      }).catch(e => 
+        diag.error('AWS Lambda callback failed', e)
+      );
     };
   }
 
+  // never fails
   private async _flush() {
-    try {
       await Promise.all([
         this._flush_trace(),
         this._flush_metric()
       ]);
-    } catch (e) {
-      // We must not fail this call, but we may log it
-      diag.error('Error while flushing the lambda', e);
-    }
   }
 
+  // never fails
   private async _flush_trace() {
     if (this._traceForceFlusher) {
-      await this._traceForceFlusher();
+      try {
+        await this._traceForceFlusher();
+      } catch (e) {
+        diag.error('Error while flushing traces', e)
+      }
     } else {
       diag.error(
         'Spans may not be exported for the lambda function because we are not force flushing before callback.'
@@ -441,9 +448,14 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     }
   }
 
+    // never fails
   private async _flush_metric() {
     if (this._metricForceFlusher) {
-      await this._metricForceFlusher();
+      try {
+        await this._metricForceFlusher();
+      } catch (e) {
+        diag.error('Error while flushing metrics', e)
+      }
     } else {
       diag.error(
         'Metrics may not be exported for the lambda function because we are not force flushing before callback.'
