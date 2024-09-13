@@ -121,7 +121,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       event: any,
       context: Context,
       callback: Callback
-    ) {
+    ): void {
 
       self._before_execution(event, context).then(
         (instrCtx) => {
@@ -140,9 +140,10 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
               } catch (err: any) {
                 // Catching synchronous failures
                 diag.debug('handler threw synchronously');
-                void self._after_execution(instrCtx, err, undefined);
-                context.callbackWaitsForEmptyEventLoop = false;
-                callback(err, undefined);
+                self._after_execution(instrCtx, err, undefined).then(() => {
+                  context.callbackWaitsForEmptyEventLoop = false;
+                  callback(err, undefined);
+                });
                 return;
               }
 
@@ -150,15 +151,15 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
                 diag.debug('handler returned a promise');
                 // Promise based async handler
                 maybePromise.then(
-                  (value: any) => {
+                  async (value: any) => {
                     diag.debug('handler promise completed');
-                    self._after_execution(instrCtx, undefined, value);
+                    await self._after_execution(instrCtx, undefined, value);
                     context.callbackWaitsForEmptyEventLoop = false;
                     callback(undefined, value);
                   },
-                  (err: Error | string) => {
+                  async (err: Error | string) => {
                     diag.debug('handler promise failed');
-                    self._after_execution(instrCtx, err, undefined);
+                    await self._after_execution(instrCtx, err, undefined);
                     context.callbackWaitsForEmptyEventLoop = false;
                     callback(err, undefined);
                   }
@@ -169,13 +170,14 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
             }
           );
         },
-        (err) => {
+        async (err) => {
           diag.error('_before_execution failed', err);
-          self._after_execution(undefined, err, undefined);
+          await self._after_execution(undefined, err, undefined);
           context.callbackWaitsForEmptyEventLoop = false;
           callback(err, undefined);
         }
       )
+
     }
   }
 
@@ -196,8 +198,6 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     }
 
     const invocationSpan = this._startInvocationSpan(event, context, invocationParentContext);
-
-    diag.info(`upstream: ${trace.getSpan(upstreamContext)?.spanContext().spanId} trigger: ${triggerSpan?.spanContext().spanId} invocationSpan: ${invocationSpan.spanContext().spanId}`)
 
     await this._sendEarlySpans(upstreamContext, triggerSpan, invocationParentContext, invocationSpan);
 
