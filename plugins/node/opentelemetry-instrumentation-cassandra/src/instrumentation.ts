@@ -18,7 +18,7 @@ import {
   context,
   trace,
   Span,
-  SpanAttributes,
+  Attributes,
   SpanKind,
   SpanStatusCode,
 } from '@opentelemetry/api';
@@ -31,30 +31,30 @@ import {
 } from '@opentelemetry/instrumentation';
 import { CassandraDriverInstrumentationConfig, ResultSet } from './types';
 import {
-  SemanticAttributes,
-  DbSystemValues,
+  DBSYSTEMVALUES_CASSANDRA,
+  SEMATTRS_DB_NAME,
+  SEMATTRS_DB_STATEMENT,
+  SEMATTRS_DB_SYSTEM,
+  SEMATTRS_DB_USER,
+  SEMATTRS_NET_PEER_NAME,
+  SEMATTRS_NET_PEER_PORT,
 } from '@opentelemetry/semantic-conventions';
-import { VERSION } from './version';
+import { PACKAGE_NAME, PACKAGE_VERSION } from './version';
 import { EventEmitter } from 'events';
 import type * as CassandraDriver from 'cassandra-driver';
 
-const supportedVersions = ['>=4.4 <5.0'];
+const supportedVersions = ['>=4.4.0 <5'];
 
-export class CassandraDriverInstrumentation extends InstrumentationBase {
-  protected override _config!: CassandraDriverInstrumentationConfig;
-
+export class CassandraDriverInstrumentation extends InstrumentationBase<CassandraDriverInstrumentationConfig> {
   constructor(config: CassandraDriverInstrumentationConfig = {}) {
-    super('@opentelemetry/instrumentation-cassandra-driver', VERSION, config);
+    super(PACKAGE_NAME, PACKAGE_VERSION, config);
   }
 
   protected init() {
-    return new InstrumentationNodeModuleDefinition<any>(
+    return new InstrumentationNodeModuleDefinition(
       'cassandra-driver',
       supportedVersions,
-      (driverModule, moduleVersion) => {
-        this._diag.debug(
-          `Applying patch for cassandra-driver@${moduleVersion}`
-        );
+      driverModule => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const Client = driverModule.Client.prototype as any;
 
@@ -76,10 +76,7 @@ export class CassandraDriverInstrumentation extends InstrumentationBase {
 
         return driverModule;
       },
-      (driverModule, moduleVersion) => {
-        this._diag.debug(
-          `Removing patch for cassandra-driver@${moduleVersion}`
-        );
+      driverModule => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const Client = driverModule.Client.prototype as any;
 
@@ -121,13 +118,11 @@ export class CassandraDriverInstrumentation extends InstrumentationBase {
   }
 
   private _getMaxQueryLength(): number {
-    const config = this.getConfig() as CassandraDriverInstrumentationConfig;
-    return config.maxQueryLength ?? 65536;
+    return this.getConfig().maxQueryLength ?? 65536;
   }
 
   private _shouldIncludeDbStatement(): boolean {
-    const config = this.getConfig() as CassandraDriverInstrumentationConfig;
-    return config.enhancedDatabaseReporting ?? false;
+    return this.getConfig().enhancedDatabaseReporting ?? false;
   }
 
   private _getPatchedExecute() {
@@ -178,10 +173,10 @@ export class CassandraDriverInstrumentation extends InstrumentationBase {
         if (span !== undefined && conn !== undefined) {
           const port = parseInt(conn.port, 10);
 
-          span.setAttribute(SemanticAttributes.NET_PEER_NAME, conn.address);
+          span.setAttribute(SEMATTRS_NET_PEER_NAME, conn.address);
 
           if (!isNaN(port)) {
-            span.setAttribute(SemanticAttributes.NET_PEER_PORT, port);
+            span.setAttribute(SEMATTRS_NET_PEER_PORT, port);
           }
         }
 
@@ -308,24 +303,24 @@ export class CassandraDriverInstrumentation extends InstrumentationBase {
     { op, query }: { op: string; query?: unknown },
     client: CassandraDriver.Client
   ): Span {
-    const attributes: SpanAttributes = {
-      [SemanticAttributes.DB_SYSTEM]: DbSystemValues.CASSANDRA,
+    const attributes: Attributes = {
+      [SEMATTRS_DB_SYSTEM]: DBSYSTEMVALUES_CASSANDRA,
     };
 
     if (this._shouldIncludeDbStatement() && query !== undefined) {
       const statement = truncateQuery(query, this._getMaxQueryLength());
-      attributes[SemanticAttributes.DB_STATEMENT] = statement;
+      attributes[SEMATTRS_DB_STATEMENT] = statement;
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const user = (client as any).options?.credentials?.username;
 
     if (user) {
-      attributes[SemanticAttributes.DB_USER] = user;
+      attributes[SEMATTRS_DB_USER] = user;
     }
 
     if (client.keyspace) {
-      attributes[SemanticAttributes.DB_NAME] = client.keyspace;
+      attributes[SEMATTRS_DB_NAME] = client.keyspace;
     }
 
     return this.tracer.startSpan(`cassandra-driver.${op}`, {
@@ -335,12 +330,13 @@ export class CassandraDriverInstrumentation extends InstrumentationBase {
   }
 
   private _callResponseHook(span: Span, response: ResultSet) {
-    if (!this._config.responseHook) {
+    const { responseHook } = this.getConfig();
+    if (!responseHook) {
       return;
     }
 
     safeExecuteInTheMiddle(
-      () => this._config.responseHook!(span, { response: response }),
+      () => responseHook(span, { response: response }),
       e => {
         if (e) {
           this._diag.error('responseHook error', e);

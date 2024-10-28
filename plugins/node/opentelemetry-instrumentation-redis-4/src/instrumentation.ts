@@ -15,7 +15,6 @@
  */
 
 import {
-  diag,
   trace,
   context,
   SpanKind,
@@ -31,15 +30,15 @@ import {
 import { getClientAttributes } from './utils';
 import { defaultDbStatementSerializer } from '@opentelemetry/redis-common';
 import { RedisInstrumentationConfig } from './types';
-import { VERSION } from './version';
-import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
+import { PACKAGE_NAME, PACKAGE_VERSION } from './version';
+import { SEMATTRS_DB_STATEMENT } from '@opentelemetry/semantic-conventions';
 import type { MultiErrorReply } from './internal-types';
 
 const OTEL_OPEN_SPANS = Symbol(
-  'opentelemetry.instruemntation.redis.open_spans'
+  'opentelemetry.instrumentation.redis.open_spans'
 );
 const MULTI_COMMAND_OPTIONS = Symbol(
-  'opentelemetry.instruemntation.redis.multi_command_options'
+  'opentelemetry.instrumentation.redis.multi_command_options'
 );
 
 interface MutliCommandInfo {
@@ -52,15 +51,15 @@ const DEFAULT_CONFIG: RedisInstrumentationConfig = {
   requireParentSpan: false,
 };
 
-export class RedisInstrumentation extends InstrumentationBase<any> {
+export class RedisInstrumentation extends InstrumentationBase<RedisInstrumentationConfig> {
   static readonly COMPONENT = 'redis';
 
-  constructor(protected override _config: RedisInstrumentationConfig = {}) {
-    super('@opentelemetry/instrumentation-redis-4', VERSION, _config);
+  constructor(config: RedisInstrumentationConfig = {}) {
+    super(PACKAGE_NAME, PACKAGE_VERSION, { ...DEFAULT_CONFIG, ...config });
   }
 
   override setConfig(config: RedisInstrumentationConfig = {}) {
-    this._config = Object.assign({}, DEFAULT_CONFIG, config);
+    super.setConfig({ ...DEFAULT_CONFIG, ...config });
   }
 
   protected init() {
@@ -75,8 +74,8 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
 
   private _getInstrumentationNodeModuleDefinition(
     basePackageName: string
-  ): InstrumentationNodeModuleDefinition<any> {
-    const commanderModuleFile = new InstrumentationNodeModuleFile<any>(
+  ): InstrumentationNodeModuleDefinition {
+    const commanderModuleFile = new InstrumentationNodeModuleFile(
       `${basePackageName}/dist/lib/commander.js`,
       ['^1.0.0'],
       (moduleExports: any, moduleVersion?: string) => {
@@ -96,7 +95,6 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
           : 'attachCommands';
         // this is the function that extend a redis client with a list of commands.
         // the function patches the commandExecutor to record a span
-        this._diag.debug('Patching redis commands executor');
         if (isWrapped(moduleExports?.[functionToPatch])) {
           this._unwrap(moduleExports, functionToPatch);
         }
@@ -109,7 +107,6 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
         return moduleExports;
       },
       (moduleExports: any) => {
-        this._diag.debug('Unpatching redis commands executor');
         if (isWrapped(moduleExports?.extendWithCommands)) {
           this._unwrap(moduleExports, 'extendWithCommands');
         }
@@ -119,11 +116,10 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
       }
     );
 
-    const multiCommanderModule = new InstrumentationNodeModuleFile<any>(
+    const multiCommanderModule = new InstrumentationNodeModuleFile(
       `${basePackageName}/dist/lib/client/multi-command.js`,
       ['^1.0.0'],
       (moduleExports: any) => {
-        this._diag.debug('Patching redis multi commands executor');
         const redisClientMultiCommandPrototype =
           moduleExports?.default?.prototype;
 
@@ -148,7 +144,6 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
         return moduleExports;
       },
       (moduleExports: any) => {
-        this._diag.debug('Unpatching redis multi commands executor');
         const redisClientMultiCommandPrototype =
           moduleExports?.default?.prototype;
         if (isWrapped(redisClientMultiCommandPrototype?.exec)) {
@@ -160,11 +155,10 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
       }
     );
 
-    const clientIndexModule = new InstrumentationNodeModuleFile<any>(
+    const clientIndexModule = new InstrumentationNodeModuleFile(
       `${basePackageName}/dist/lib/client/index.js`,
       ['^1.0.0'],
       (moduleExports: any) => {
-        this._diag.debug('Patching redis client');
         const redisClientPrototype = moduleExports?.default?.prototype;
 
         // In some @redis/client versions 'multi' is a method. In later
@@ -211,7 +205,6 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
         return moduleExports;
       },
       (moduleExports: any) => {
-        this._diag.debug('Unpatching redis client');
         const redisClientPrototype = moduleExports?.default?.prototype;
         if (isWrapped(redisClientPrototype?.multi)) {
           this._unwrap(redisClientPrototype, 'multi');
@@ -225,20 +218,13 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
       }
     );
 
-    return new InstrumentationNodeModuleDefinition<unknown>(
+    return new InstrumentationNodeModuleDefinition(
       basePackageName,
       ['^1.0.0'],
-      (moduleExports: any, moduleVersion?: string) => {
-        diag.debug(
-          `Patching ${basePackageName}/client@${moduleVersion} (redis@^4.0.0)`
-        );
+      (moduleExports: any) => {
         return moduleExports;
       },
-      (_moduleExports: any, moduleVersion?: string) => {
-        diag.debug(
-          `Unpatching ${basePackageName}/client@${moduleVersion} (redis@^4.0.0)`
-        );
-      },
+      () => {},
       [commanderModuleFile, multiCommanderModule, clientIndexModule]
     );
   }
@@ -349,7 +335,7 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
       return function patchedConnect(this: any): Promise<void> {
         const options = this.options;
 
-        const attributes = getClientAttributes(this._diag, options);
+        const attributes = getClientAttributes(plugin._diag, options);
 
         const span = plugin.tracer.startSpan(
           `${RedisInstrumentation.COMPONENT}-connect`,
@@ -388,7 +374,7 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
     redisCommandArguments: Array<string | Buffer>
   ) {
     const hasNoParentSpan = trace.getSpan(context.active()) === undefined;
-    if (hasNoParentSpan && this._config?.requireParentSpan) {
+    if (hasNoParentSpan && this.getConfig().requireParentSpan) {
       return origFunction.apply(origThis, origArguments);
     }
 
@@ -398,14 +384,14 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
     const commandArgs = redisCommandArguments.slice(1);
 
     const dbStatementSerializer =
-      this._config?.dbStatementSerializer || defaultDbStatementSerializer;
+      this.getConfig().dbStatementSerializer || defaultDbStatementSerializer;
 
     const attributes = getClientAttributes(this._diag, clientOptions);
 
     try {
       const dbStatement = dbStatementSerializer(commandName, commandArgs);
       if (dbStatement != null) {
-        attributes[SemanticAttributes.DB_STATEMENT] = dbStatement;
+        attributes[SEMATTRS_DB_STATEMENT] = dbStatement;
       }
     } catch (e) {
       this._diag.error('dbStatementSerializer throw an exception', e, {
@@ -486,9 +472,10 @@ export class RedisInstrumentation extends InstrumentationBase<any> {
     response: unknown,
     error: Error | undefined
   ) {
-    if (!error && this._config.responseHook) {
+    const { responseHook } = this.getConfig();
+    if (!error && responseHook) {
       try {
-        this._config.responseHook(span, commandName, commandArgs, response);
+        responseHook(span, commandName, commandArgs, response);
       } catch (err) {
         this._diag.error('responseHook throw an exception', err);
       }

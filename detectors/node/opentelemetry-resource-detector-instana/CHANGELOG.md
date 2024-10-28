@@ -1,10 +1,77 @@
 # Changelog
 
+## [0.12.0](https://github.com/open-telemetry/opentelemetry-js-contrib/compare/resource-detector-instana-v0.11.0...resource-detector-instana-v0.12.0) (2024-09-02)
+
+
+### Features
+
+* update deps matching "@opentelemetry/" ([9fa058e](https://github.com/open-telemetry/opentelemetry-js-contrib/commit/9fa058ebb919de4e2a4e1af95b3c792c6ea962ac))
+
+
 ### Dependencies
 
 * The following workspace dependencies were updated
   * devDependencies
-    * @opentelemetry/contrib-test-utils bumped from ^0.34.3 to ^0.35.0
+    * @opentelemetry/contrib-test-utils bumped from ^0.40.0 to ^0.41.0
+
+## [0.11.0](https://github.com/open-telemetry/opentelemetry-js-contrib/compare/resource-detector-instana-v0.10.0...resource-detector-instana-v0.11.0) (2024-08-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **detector-alibaba:** change implementation to DetectorSync interface ([#2328](https://github.com/open-telemetry/opentelemetry-js-contrib/issues/2328))
+
+### Features
+
+* **detector-alibaba:** change implementation to DetectorSync interface ([#2328](https://github.com/open-telemetry/opentelemetry-js-contrib/issues/2328)) ([25e85c7](https://github.com/open-telemetry/opentelemetry-js-contrib/commit/25e85c7b128f7424b51987e9f4c067e0b538fe2f))
+
+## [0.10.0](https://github.com/open-telemetry/opentelemetry-js-contrib/compare/resource-detector-instana-v0.9.0...resource-detector-instana-v0.10.0) (2024-06-06)
+
+
+### Features
+
+* update otel core dependencies ([#2257](https://github.com/open-telemetry/opentelemetry-js-contrib/issues/2257)) ([71c15d5](https://github.com/open-telemetry/opentelemetry-js-contrib/commit/71c15d597276773c19c16c1117b8d151892e5366))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @opentelemetry/contrib-test-utils bumped from ^0.39.0 to ^0.40.0
+
+## [0.9.0](https://github.com/open-telemetry/opentelemetry-js-contrib/compare/resource-detector-instana-v0.8.0...resource-detector-instana-v0.9.0) (2024-04-25)
+
+
+### Features
+
+* **deps:** update otel-js to 0.51.0 ([80cbee7](https://github.com/open-telemetry/opentelemetry-js-contrib/commit/80cbee73130c65c8ccd78384485a7be8d2a4a84b))
+* remove generic type from instrumentations ([80cbee7](https://github.com/open-telemetry/opentelemetry-js-contrib/commit/80cbee73130c65c8ccd78384485a7be8d2a4a84b))
+
+
+### Bug Fixes
+
+* revert modifications to Apache license ([#2105](https://github.com/open-telemetry/opentelemetry-js-contrib/issues/2105)) ([4590c8d](https://github.com/open-telemetry/opentelemetry-js-contrib/commit/4590c8df184bbcb9bd67ce1111df9f25f865ccf2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @opentelemetry/contrib-test-utils bumped from ^0.38.0 to ^0.39.0
+
+## [0.8.0](https://github.com/open-telemetry/opentelemetry-js-contrib/compare/resource-detector-instana-v0.7.0...resource-detector-instana-v0.8.0) (2024-04-03)
+
+
+### Features
+
+* **deps:** update otel-js to 1.23.0/0.50.0 ([#2076](https://github.com/open-telemetry/opentelemetry-js-contrib/issues/2076)) ([d5f079b](https://github.com/open-telemetry/opentelemetry-js-contrib/commit/d5f079b3992395dcfb3b791c9fdaeefd6d6526f8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @opentelemetry/contrib-test-utils bumped from ^0.37.0 to ^0.38.0
 
 ## [0.7.0](https://github.com/open-telemetry/opentelemetry-js-contrib/compare/resource-detector-instana-v0.6.0...resource-detector-instana-v0.7.0) (2024-03-06)
 

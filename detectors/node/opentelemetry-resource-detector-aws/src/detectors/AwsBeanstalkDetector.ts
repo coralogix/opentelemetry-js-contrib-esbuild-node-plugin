@@ -14,19 +14,13 @@
  * limitations under the License.
  */
 
-import { diag } from '@opentelemetry/api';
 import {
   Detector,
-  Resource,
+  IResource,
   ResourceDetectionConfig,
 } from '@opentelemetry/resources';
-import {
-  CloudProviderValues,
-  CloudPlatformValues,
-  SemanticResourceAttributes,
-} from '@opentelemetry/semantic-conventions';
-import * as fs from 'fs';
-import * as util from 'util';
+
+import { awsBeanstalkDetectorSync } from './AwsBeanstalkDetectorSync';
 
 /**
  * The AwsBeanstalkDetector can be used to detect if a process is running in AWS Elastic
@@ -35,55 +29,13 @@ import * as util from 'util';
  *
  * See https://docs.amazonaws.cn/en_us/xray/latest/devguide/xray-guide.pdf
  * for more details about detecting information of Elastic Beanstalk plugins
+ *
+ * @deprecated Use {@link AwsBeanstalkDetectorSync} class instead.
  */
 
-const DEFAULT_BEANSTALK_CONF_PATH =
-  '/var/elasticbeanstalk/xray/environment.conf';
-const WIN_OS_BEANSTALK_CONF_PATH =
-  'C:\\Program Files\\Amazon\\XRay\\environment.conf';
-
 export class AwsBeanstalkDetector implements Detector {
-  BEANSTALK_CONF_PATH: string;
-  private static readFileAsync = util.promisify(fs.readFile);
-  private static fileAccessAsync = util.promisify(fs.access);
-
-  constructor() {
-    if (process.platform === 'win32') {
-      this.BEANSTALK_CONF_PATH = WIN_OS_BEANSTALK_CONF_PATH;
-    } else {
-      this.BEANSTALK_CONF_PATH = DEFAULT_BEANSTALK_CONF_PATH;
-    }
-  }
-
-  async detect(_config?: ResourceDetectionConfig): Promise<Resource> {
-    try {
-      await AwsBeanstalkDetector.fileAccessAsync(
-        this.BEANSTALK_CONF_PATH,
-        fs.constants.R_OK
-      );
-
-      const rawData = await AwsBeanstalkDetector.readFileAsync(
-        this.BEANSTALK_CONF_PATH,
-        'utf8'
-      );
-      const parsedData = JSON.parse(rawData);
-
-      return new Resource({
-        [SemanticResourceAttributes.CLOUD_PROVIDER]: CloudProviderValues.AWS,
-        [SemanticResourceAttributes.CLOUD_PLATFORM]:
-          CloudPlatformValues.AWS_ELASTIC_BEANSTALK,
-        [SemanticResourceAttributes.SERVICE_NAME]:
-          CloudPlatformValues.AWS_ELASTIC_BEANSTALK,
-        [SemanticResourceAttributes.SERVICE_NAMESPACE]:
-          parsedData.environment_name,
-        [SemanticResourceAttributes.SERVICE_VERSION]: parsedData.version_label,
-        [SemanticResourceAttributes.SERVICE_INSTANCE_ID]:
-          parsedData.deployment_id,
-      });
-    } catch (e: any) {
-      diag.debug(`AwsBeanstalkDetector failed: ${e.message}`);
-      return Resource.empty();
-    }
+  detect(config?: ResourceDetectionConfig): Promise<IResource> {
+    return Promise.resolve(awsBeanstalkDetectorSync.detect(config));
   }
 }
 

@@ -21,7 +21,7 @@ import {
   InstrumentationNodeModuleDefinition,
   isWrapped,
 } from '@opentelemetry/instrumentation';
-import { VERSION } from './version';
+import { PACKAGE_NAME, PACKAGE_VERSION } from './version';
 import {
   CALLBACK_FUNCTIONS,
   PROMISE_FUNCTIONS,
@@ -51,21 +51,20 @@ function patchedFunctionWithOriginalProperties<
   return Object.assign(patchedFunction, original);
 }
 
-export default class FsInstrumentation extends InstrumentationBase<FS> {
-  constructor(config?: FsInstrumentationConfig) {
-    super('@opentelemetry/instrumentation-fs', VERSION, config);
+export class FsInstrumentation extends InstrumentationBase<FsInstrumentationConfig> {
+  constructor(config: FsInstrumentationConfig = {}) {
+    super(PACKAGE_NAME, PACKAGE_VERSION, config);
   }
 
   init(): (
-    | InstrumentationNodeModuleDefinition<FS>
-    | InstrumentationNodeModuleDefinition<FSPromises>
+    | InstrumentationNodeModuleDefinition
+    | InstrumentationNodeModuleDefinition
   )[] {
     return [
-      new InstrumentationNodeModuleDefinition<FS>(
+      new InstrumentationNodeModuleDefinition(
         'fs',
         ['*'],
         (fs: FS) => {
-          this._diag.debug('Applying patch for fs');
           for (const fName of SYNC_FUNCTIONS) {
             const { objectToPatch, functionNameToPatch } = indexFs(fs, fName);
 
@@ -113,7 +112,6 @@ export default class FsInstrumentation extends InstrumentationBase<FS> {
         },
         (fs: FS) => {
           if (fs === undefined) return;
-          this._diag.debug('Removing patch for fs');
           for (const fName of SYNC_FUNCTIONS) {
             const { objectToPatch, functionNameToPatch } = indexFs(fs, fName);
             if (isWrapped(objectToPatch[functionNameToPatch])) {
@@ -133,11 +131,10 @@ export default class FsInstrumentation extends InstrumentationBase<FS> {
           }
         }
       ),
-      new InstrumentationNodeModuleDefinition<FSPromises>(
+      new InstrumentationNodeModuleDefinition(
         'fs/promises',
         ['*'],
         (fsPromises: FSPromises) => {
-          this._diag.debug('Applying patch for fs/promises');
           for (const fName of PROMISE_FUNCTIONS) {
             if (isWrapped(fsPromises[fName])) {
               this._unwrap(fsPromises, fName);
@@ -152,7 +149,6 @@ export default class FsInstrumentation extends InstrumentationBase<FS> {
         },
         (fsPromises: FSPromises) => {
           if (fsPromises === undefined) return;
-          this._diag.debug('Removing patch for fs/promises');
           for (const fName of PROMISE_FUNCTIONS) {
             if (isWrapped(fsPromises[fName])) {
               this._unwrap(fsPromises, fName);
@@ -442,7 +438,7 @@ export default class FsInstrumentation extends InstrumentationBase<FS> {
   protected _runCreateHook(
     ...args: Parameters<CreateHook>
   ): ReturnType<CreateHook> {
-    const { createHook } = this.getConfig() as FsInstrumentationConfig;
+    const { createHook } = this.getConfig();
     if (typeof createHook === 'function') {
       try {
         return createHook(...args);
@@ -454,7 +450,7 @@ export default class FsInstrumentation extends InstrumentationBase<FS> {
   }
 
   protected _runEndHook(...args: Parameters<EndHook>): ReturnType<EndHook> {
-    const { endHook } = this.getConfig() as FsInstrumentationConfig;
+    const { endHook } = this.getConfig();
     if (typeof endHook === 'function') {
       try {
         endHook(...args);
@@ -471,7 +467,7 @@ export default class FsInstrumentation extends InstrumentationBase<FS> {
       return false;
     }
 
-    const { requireParentSpan } = this.getConfig() as FsInstrumentationConfig;
+    const { requireParentSpan } = this.getConfig();
     if (requireParentSpan) {
       const parentSpan = api.trace.getSpan(context);
       if (parentSpan == null) {

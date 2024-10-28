@@ -17,15 +17,24 @@
 import * as gcpMetadata from 'gcp-metadata';
 import { diag } from '@opentelemetry/api';
 import {
-  Detector,
+  DetectorSync,
   ResourceDetectionConfig,
   Resource,
   ResourceAttributes,
+  IResource,
 } from '@opentelemetry/resources';
 import { getEnv } from '@opentelemetry/core';
 import {
-  CloudProviderValues,
-  SemanticResourceAttributes,
+  CLOUDPROVIDERVALUES_GCP,
+  SEMRESATTRS_CLOUD_ACCOUNT_ID,
+  SEMRESATTRS_CLOUD_AVAILABILITY_ZONE,
+  SEMRESATTRS_CLOUD_PROVIDER,
+  SEMRESATTRS_CONTAINER_NAME,
+  SEMRESATTRS_HOST_ID,
+  SEMRESATTRS_HOST_NAME,
+  SEMRESATTRS_K8S_CLUSTER_NAME,
+  SEMRESATTRS_K8S_NAMESPACE_NAME,
+  SEMRESATTRS_K8S_POD_NAME,
 } from '@opentelemetry/semantic-conventions';
 
 /**
@@ -33,19 +42,21 @@ import {
  * Cloud Platform and return a {@link Resource} populated with metadata about
  * the instance. Returns an empty Resource if detection fails.
  */
-class GcpDetector implements Detector {
+class GcpDetector implements DetectorSync {
+  detect(_config?: ResourceDetectionConfig): IResource {
+    return new Resource({}, this._getAttribures());
+  }
+
   /**
    * Attempts to connect and obtain instance configuration data from the GCP metadata service.
-   * If the connection is successful it returns a promise containing a {@link Resource}
-   * populated with instance metadata. Returns a promise containing an
-   * empty {@link Resource} if the connection or parsing of the metadata fails.
-   *
-   * @param config The resource detection config
+   * If the connection is successful it returns a promise containing a {@link ResourceAttributes}
+   * object with instance metadata. Returns a promise containing an
+   * empty {@link ResourceAttributes} if the connection or parsing of the metadata fails.
    */
-  async detect(_config?: ResourceDetectionConfig): Promise<Resource> {
+  private async _getAttribures(): Promise<ResourceAttributes> {
     if (!(await gcpMetadata.isAvailable())) {
       diag.debug('GcpDetector failed: GCP Metadata unavailable.');
-      return Resource.empty();
+      return {};
     }
 
     const [projectId, instanceId, zoneId, clusterName, hostname] =
@@ -58,17 +69,16 @@ class GcpDetector implements Detector {
       ]);
 
     const attributes: ResourceAttributes = {};
-    attributes[SemanticResourceAttributes.CLOUD_ACCOUNT_ID] = projectId;
-    attributes[SemanticResourceAttributes.HOST_ID] = instanceId;
-    attributes[SemanticResourceAttributes.HOST_NAME] = hostname;
-    attributes[SemanticResourceAttributes.CLOUD_AVAILABILITY_ZONE] = zoneId;
-    attributes[SemanticResourceAttributes.CLOUD_PROVIDER] =
-      CloudProviderValues.GCP;
+    attributes[SEMRESATTRS_CLOUD_ACCOUNT_ID] = projectId;
+    attributes[SEMRESATTRS_HOST_ID] = instanceId;
+    attributes[SEMRESATTRS_HOST_NAME] = hostname;
+    attributes[SEMRESATTRS_CLOUD_AVAILABILITY_ZONE] = zoneId;
+    attributes[SEMRESATTRS_CLOUD_PROVIDER] = CLOUDPROVIDERVALUES_GCP;
 
     if (getEnv().KUBERNETES_SERVICE_HOST)
       this._addK8sAttributes(attributes, clusterName);
 
-    return new Resource(attributes);
+    return attributes;
   }
 
   /** Add resource attributes for K8s */
@@ -78,10 +88,10 @@ class GcpDetector implements Detector {
   ): void {
     const env = getEnv();
 
-    attributes[SemanticResourceAttributes.K8S_CLUSTER_NAME] = clusterName;
-    attributes[SemanticResourceAttributes.K8S_NAMESPACE_NAME] = env.NAMESPACE;
-    attributes[SemanticResourceAttributes.K8S_POD_NAME] = env.HOSTNAME;
-    attributes[SemanticResourceAttributes.CONTAINER_NAME] = env.CONTAINER_NAME;
+    attributes[SEMRESATTRS_K8S_CLUSTER_NAME] = clusterName;
+    attributes[SEMRESATTRS_K8S_NAMESPACE_NAME] = env.NAMESPACE;
+    attributes[SEMRESATTRS_K8S_POD_NAME] = env.HOSTNAME;
+    attributes[SEMRESATTRS_CONTAINER_NAME] = env.CONTAINER_NAME;
   }
 
   /** Gets project id from GCP project metadata. */

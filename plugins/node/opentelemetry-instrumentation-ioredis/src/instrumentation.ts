@@ -23,38 +23,41 @@ import {
 import { IORedisInstrumentationConfig } from './types';
 import { IORedisCommand, RedisInterface } from './internal-types';
 import {
-  DbSystemValues,
-  SemanticAttributes,
+  DBSYSTEMVALUES_REDIS,
+  SEMATTRS_DB_CONNECTION_STRING,
+  SEMATTRS_DB_STATEMENT,
+  SEMATTRS_DB_SYSTEM,
+  SEMATTRS_NET_PEER_NAME,
+  SEMATTRS_NET_PEER_PORT,
 } from '@opentelemetry/semantic-conventions';
 import { safeExecuteInTheMiddle } from '@opentelemetry/instrumentation';
 import { endSpan } from './utils';
 import { defaultDbStatementSerializer } from '@opentelemetry/redis-common';
-import { VERSION } from './version';
+import { PACKAGE_NAME, PACKAGE_VERSION } from './version';
 
 const DEFAULT_CONFIG: IORedisInstrumentationConfig = {
   requireParentSpan: true,
 };
 
-export class IORedisInstrumentation extends InstrumentationBase<any> {
-  constructor(_config: IORedisInstrumentationConfig = {}) {
-    super(
-      '@opentelemetry/instrumentation-ioredis',
-      VERSION,
-      Object.assign({}, DEFAULT_CONFIG, _config)
-    );
+export class IORedisInstrumentation extends InstrumentationBase<IORedisInstrumentationConfig> {
+  constructor(config: IORedisInstrumentationConfig = {}) {
+    super(PACKAGE_NAME, PACKAGE_VERSION, { ...DEFAULT_CONFIG, ...config });
   }
 
-  init(): InstrumentationNodeModuleDefinition<any>[] {
+  override setConfig(config: IORedisInstrumentationConfig = {}) {
+    super.setConfig({ ...DEFAULT_CONFIG, ...config });
+  }
+
+  init(): InstrumentationNodeModuleDefinition[] {
     return [
-      new InstrumentationNodeModuleDefinition<any>(
+      new InstrumentationNodeModuleDefinition(
         'ioredis',
-        ['>1', '<6'],
+        ['>=2.0.0 <6'],
         (module, moduleVersion?: string) => {
           const moduleExports =
             module[Symbol.toStringTag] === 'Module'
               ? module.default // ESM
               : module; // CommonJS
-          diag.debug('Applying patch for ioredis');
           if (isWrapped(moduleExports.prototype.sendCommand)) {
             this._unwrap(moduleExports.prototype, 'sendCommand');
           }
@@ -79,7 +82,6 @@ export class IORedisInstrumentation extends InstrumentationBase<any> {
             module[Symbol.toStringTag] === 'Module'
               ? module.default // ESM
               : module; // CommonJS
-          diag.debug('Removing patch for ioredis');
           this._unwrap(moduleExports.prototype, 'sendCommand');
           this._unwrap(moduleExports.prototype, 'connect');
         }
@@ -108,31 +110,28 @@ export class IORedisInstrumentation extends InstrumentationBase<any> {
       if (arguments.length < 1 || typeof cmd !== 'object') {
         return original.apply(this, arguments);
       }
-      const config =
-        instrumentation.getConfig() as IORedisInstrumentationConfig;
+      const config = instrumentation.getConfig();
       const dbStatementSerializer =
-        config?.dbStatementSerializer || defaultDbStatementSerializer;
+        config.dbStatementSerializer || defaultDbStatementSerializer;
 
       const hasNoParentSpan = trace.getSpan(context.active()) === undefined;
-      if (config?.requireParentSpan === true && hasNoParentSpan) {
+      if (config.requireParentSpan === true && hasNoParentSpan) {
         return original.apply(this, arguments);
       }
 
       const span = instrumentation.tracer.startSpan(cmd.name, {
         kind: SpanKind.CLIENT,
         attributes: {
-          [SemanticAttributes.DB_SYSTEM]: DbSystemValues.REDIS,
-          [SemanticAttributes.DB_STATEMENT]: dbStatementSerializer(
-            cmd.name,
-            cmd.args
-          ),
+          [SEMATTRS_DB_SYSTEM]: DBSYSTEMVALUES_REDIS,
+          [SEMATTRS_DB_STATEMENT]: dbStatementSerializer(cmd.name, cmd.args),
         },
       });
 
-      if (config?.requestHook) {
+      const { requestHook } = config;
+      if (requestHook) {
         safeExecuteInTheMiddle(
           () =>
-            config?.requestHook!(span, {
+            requestHook(span, {
               moduleVersion,
               cmdName: cmd.name,
               cmdArgs: cmd.args,
@@ -149,9 +148,9 @@ export class IORedisInstrumentation extends InstrumentationBase<any> {
       const { host, port } = this.options;
 
       span.setAttributes({
-        [SemanticAttributes.NET_PEER_NAME]: host,
-        [SemanticAttributes.NET_PEER_PORT]: port,
-        [SemanticAttributes.DB_CONNECTION_STRING]: `redis://${host}:${port}`,
+        [SEMATTRS_NET_PEER_NAME]: host,
+        [SEMATTRS_NET_PEER_PORT]: port,
+        [SEMATTRS_DB_CONNECTION_STRING]: `redis://${host}:${port}`,
       });
 
       try {
@@ -161,7 +160,7 @@ export class IORedisInstrumentation extends InstrumentationBase<any> {
         /* eslint-disable @typescript-eslint/no-explicit-any */
         cmd.resolve = function (result: any) {
           safeExecuteInTheMiddle(
-            () => config?.responseHook?.(span, cmd.name, cmd.args, result),
+            () => config.responseHook?.(span, cmd.name, cmd.args, result),
             e => {
               if (e) {
                 diag.error('ioredis instrumentation: response hook failed', e);
@@ -191,26 +190,27 @@ export class IORedisInstrumentation extends InstrumentationBase<any> {
   private _traceConnection(original: Function) {
     const instrumentation = this;
     return function (this: RedisInterface) {
-      const config =
-        instrumentation.getConfig() as IORedisInstrumentationConfig;
       const hasNoParentSpan = trace.getSpan(context.active()) === undefined;
-      if (config?.requireParentSpan === true && hasNoParentSpan) {
+      if (
+        instrumentation.getConfig().requireParentSpan === true &&
+        hasNoParentSpan
+      ) {
         return original.apply(this, arguments);
       }
 
       const span = instrumentation.tracer.startSpan('connect', {
         kind: SpanKind.CLIENT,
         attributes: {
-          [SemanticAttributes.DB_SYSTEM]: DbSystemValues.REDIS,
-          [SemanticAttributes.DB_STATEMENT]: 'connect',
+          [SEMATTRS_DB_SYSTEM]: DBSYSTEMVALUES_REDIS,
+          [SEMATTRS_DB_STATEMENT]: 'connect',
         },
       });
       const { host, port } = this.options;
 
       span.setAttributes({
-        [SemanticAttributes.NET_PEER_NAME]: host,
-        [SemanticAttributes.NET_PEER_PORT]: port,
-        [SemanticAttributes.DB_CONNECTION_STRING]: `redis://${host}:${port}`,
+        [SEMATTRS_NET_PEER_NAME]: host,
+        [SEMATTRS_NET_PEER_PORT]: port,
+        [SEMATTRS_DB_CONNECTION_STRING]: `redis://${host}:${port}`,
       });
       try {
         const client = original.apply(this, arguments);

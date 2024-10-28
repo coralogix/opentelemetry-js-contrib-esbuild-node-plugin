@@ -17,10 +17,7 @@
 import * as assert from 'assert';
 import * as nock from 'nock';
 import * as sinon from 'sinon';
-import {
-  awsEcsDetector,
-  AwsEcsDetector,
-} from '../../src/detectors/AwsEcsDetector';
+import { awsEcsDetector, AwsEcsDetectorSync } from '../../src';
 import {
   assertEmptyResource,
   assertCloudResource,
@@ -28,10 +25,22 @@ import {
 } from '@opentelemetry/contrib-test-utils';
 import { Resource } from '@opentelemetry/resources';
 import {
-  CloudProviderValues,
-  CloudPlatformValues,
-  SemanticResourceAttributes,
+  SEMRESATTRS_CLOUD_PLATFORM,
+  SEMRESATTRS_AWS_ECS_CONTAINER_ARN,
+  SEMRESATTRS_AWS_ECS_CLUSTER_ARN,
+  SEMRESATTRS_AWS_ECS_LAUNCHTYPE,
+  SEMRESATTRS_AWS_ECS_TASK_ARN,
+  SEMRESATTRS_AWS_ECS_TASK_REVISION,
+  SEMRESATTRS_AWS_ECS_TASK_FAMILY,
+  SEMRESATTRS_AWS_LOG_GROUP_NAMES,
+  SEMRESATTRS_AWS_LOG_GROUP_ARNS,
+  SEMRESATTRS_AWS_LOG_STREAM_NAMES,
+  SEMRESATTRS_AWS_LOG_STREAM_ARNS,
+  CLOUDPROVIDERVALUES_AWS,
+  CLOUDPLATFORMVALUES_AWS_ECS,
 } from '@opentelemetry/semantic-conventions';
+// Patch until the OpenTelemetry SDK is updated to ship this attribute
+import { SemanticResourceAttributes as AdditionalSemanticResourceAttributes } from '../../src/detectors/SemanticResourceAttributes';
 import { readFileSync } from 'fs';
 import * as os from 'os';
 import { join } from 'path';
@@ -57,63 +66,67 @@ const assertEcsResource = (
   validations: EcsResourceAttributes
 ) => {
   assertCloudResource(resource, {
-    provider: CloudProviderValues.AWS,
+    provider: CLOUDPROVIDERVALUES_AWS,
     accountId: validations.accountId,
     region: validations.region,
     zone: validations.zone,
   });
   assert.strictEqual(
-    resource.attributes[SemanticResourceAttributes.CLOUD_PLATFORM],
-    CloudPlatformValues.AWS_ECS
+    resource.attributes[SEMRESATTRS_CLOUD_PLATFORM],
+    CLOUDPLATFORMVALUES_AWS_ECS
   );
   if (validations.containerArn)
     assert.strictEqual(
-      resource.attributes[SemanticResourceAttributes.AWS_ECS_CONTAINER_ARN],
+      resource.attributes[SEMRESATTRS_AWS_ECS_CONTAINER_ARN],
       validations.containerArn
     );
+  assert.strictEqual(
+    resource.attributes[AdditionalSemanticResourceAttributes.CLOUD_RESOURCE_ID],
+    validations.containerArn
+  );
   if (validations.clusterArn)
     assert.strictEqual(
-      resource.attributes[SemanticResourceAttributes.AWS_ECS_CLUSTER_ARN],
+      resource.attributes[SEMRESATTRS_AWS_ECS_CLUSTER_ARN],
       validations.clusterArn
     );
   if (validations.launchType)
     assert.strictEqual(
-      resource.attributes[SemanticResourceAttributes.AWS_ECS_LAUNCHTYPE],
+      resource.attributes[SEMRESATTRS_AWS_ECS_LAUNCHTYPE],
       validations.launchType
     );
   if (validations.taskArn)
     assert.strictEqual(
-      resource.attributes[SemanticResourceAttributes.AWS_ECS_TASK_ARN],
+      resource.attributes[SEMRESATTRS_AWS_ECS_TASK_ARN],
       validations.taskArn
     );
   if (validations.taskFamily)
     assert.strictEqual(
-      resource.attributes[SemanticResourceAttributes.AWS_ECS_TASK_FAMILY],
+      resource.attributes[SEMRESATTRS_AWS_ECS_TASK_FAMILY],
       validations.taskFamily
     );
   if (validations.taskRevision)
     assert.strictEqual(
-      resource.attributes[SemanticResourceAttributes.AWS_ECS_TASK_REVISION],
+      resource.attributes[SEMRESATTRS_AWS_ECS_TASK_REVISION],
       validations.taskRevision
     );
   if (validations.logGroupNames)
     assert.deepEqual(
-      resource.attributes[SemanticResourceAttributes.AWS_LOG_GROUP_NAMES],
+      resource.attributes[SEMRESATTRS_AWS_LOG_GROUP_NAMES],
       validations.logGroupNames
     );
   if (validations.logGroupArns)
     assert.deepEqual(
-      resource.attributes[SemanticResourceAttributes.AWS_LOG_GROUP_ARNS],
+      resource.attributes[SEMRESATTRS_AWS_LOG_GROUP_ARNS],
       validations.logGroupArns
     );
   if (validations.logStreamNames)
     assert.deepEqual(
-      resource.attributes[SemanticResourceAttributes.AWS_LOG_STREAM_NAMES],
+      resource.attributes[SEMRESATTRS_AWS_LOG_STREAM_NAMES],
       validations.logStreamNames
     );
   if (validations.logStreamArns)
     assert.deepEqual(
-      resource.attributes[SemanticResourceAttributes.AWS_LOG_STREAM_ARNS],
+      resource.attributes[SEMRESATTRS_AWS_LOG_STREAM_ARNS],
       validations.logStreamArns
     );
 };
@@ -146,10 +159,11 @@ describe('AwsEcsResourceDetector', () => {
     process.env.ECS_CONTAINER_METADATA_URI = 'ecs_metadata_v3_uri';
     sinon.stub(os, 'hostname').returns(hostNameData);
     readStub = sinon
-      .stub(AwsEcsDetector, 'readFileAsync' as any)
+      .stub(AwsEcsDetectorSync, 'readFileAsync' as any)
       .resolves(noisyCgroupData);
 
     const resource = await awsEcsDetector.detect();
+    await resource.waitForAsyncAttributes?.();
 
     sinon.assert.calledOnce(readStub);
     assert.ok(resource);
@@ -164,10 +178,11 @@ describe('AwsEcsResourceDetector', () => {
     process.env.ECS_CONTAINER_METADATA_URI = 'ecs_metadata_v3_uri';
     sinon.stub(os, 'hostname').returns(hostNameData);
     readStub = sinon
-      .stub(AwsEcsDetector, 'readFileAsync' as any)
+      .stub(AwsEcsDetectorSync, 'readFileAsync' as any)
       .resolves(multiValidCgroupData);
 
     const resource = await awsEcsDetector.detect();
+    await resource.waitForAsyncAttributes?.();
 
     sinon.assert.calledOnce(readStub);
     assert.ok(resource);
@@ -181,10 +196,11 @@ describe('AwsEcsResourceDetector', () => {
   it('should empty resource without accessing files', async () => {
     sinon.stub(os, 'hostname').returns(hostNameData);
     readStub = sinon
-      .stub(AwsEcsDetector, 'readFileAsync' as any)
+      .stub(AwsEcsDetectorSync, 'readFileAsync' as any)
       .resolves(correctCgroupData);
 
     const resource = await awsEcsDetector.detect();
+    await resource.waitForAsyncAttributes?.();
 
     sinon.assert.notCalled(readStub);
     assert.ok(resource);
@@ -199,7 +215,7 @@ describe('AwsEcsResourceDetector', () => {
       process.env.ECS_CONTAINER_METADATA_URI_V4 = ECS_CONTAINER_METADATA_URI_V4;
     });
 
-    describe('when succesfully retrieving the data', () => {
+    describe('when successfully retrieving the data', () => {
       function generateLaunchTypeTests(
         resourceAttributes: EcsResourceAttributes,
         suffix = ''
@@ -240,10 +256,11 @@ describe('AwsEcsResourceDetector', () => {
         it('should successfully return resource data', async () => {
           sinon.stub(os, 'hostname').returns(hostNameData);
           readStub = sinon
-            .stub(AwsEcsDetector, 'readFileAsync' as any)
+            .stub(AwsEcsDetectorSync, 'readFileAsync' as any)
             .resolves(correctCgroupData);
 
           const resource = await awsEcsDetector.detect();
+          await resource.waitForAsyncAttributes?.();
 
           sinon.assert.calledOnce(readStub);
           assert.ok(resource);
@@ -257,10 +274,11 @@ describe('AwsEcsResourceDetector', () => {
         it('should return resource only with hostname attribute without cgroup file', async () => {
           sinon.stub(os, 'hostname').returns(hostNameData);
           readStub = sinon
-            .stub(AwsEcsDetector, 'readFileAsync' as any)
+            .stub(AwsEcsDetectorSync, 'readFileAsync' as any)
             .rejects(errorMsg.fileNotFoundError);
 
           const resource = await awsEcsDetector.detect();
+          await resource.waitForAsyncAttributes?.();
 
           sinon.assert.calledOnce(readStub);
           assert.ok(resource);
@@ -273,10 +291,11 @@ describe('AwsEcsResourceDetector', () => {
         it('should return resource only with hostname attribute when cgroup file does not contain valid container ID', async () => {
           sinon.stub(os, 'hostname').returns(hostNameData);
           readStub = sinon
-            .stub(AwsEcsDetector, 'readFileAsync' as any)
+            .stub(AwsEcsDetectorSync, 'readFileAsync' as any)
             .resolves('');
 
           const resource = await awsEcsDetector.detect();
+          await resource.waitForAsyncAttributes?.();
 
           sinon.assert.calledOnce(readStub);
           assert.ok(resource);
@@ -289,10 +308,11 @@ describe('AwsEcsResourceDetector', () => {
         it('should return resource only with container ID attribute without hostname', async () => {
           sinon.stub(os, 'hostname').returns('');
           readStub = sinon
-            .stub(AwsEcsDetector, 'readFileAsync' as any)
+            .stub(AwsEcsDetectorSync, 'readFileAsync' as any)
             .resolves(correctCgroupData);
 
           const resource = await awsEcsDetector.detect();
+          await resource.waitForAsyncAttributes?.();
 
           sinon.assert.calledOnce(readStub);
           assert.ok(resource);
@@ -305,10 +325,11 @@ describe('AwsEcsResourceDetector', () => {
         it('should return metadata v4 resource attributes when both hostname and container ID are invalid', async () => {
           sinon.stub(os, 'hostname').returns('');
           readStub = sinon
-            .stub(AwsEcsDetector, 'readFileAsync' as any)
+            .stub(AwsEcsDetectorSync, 'readFileAsync' as any)
             .rejects(errorMsg.fileNotFoundError);
 
           const resource = await awsEcsDetector.detect();
+          await resource.waitForAsyncAttributes?.();
 
           sinon.assert.calledOnce(readStub);
           assert.ok(resource);
@@ -390,16 +411,14 @@ describe('AwsEcsResourceDetector', () => {
       const error = new Error('ERROR');
 
       beforeEach(() => {
-        sinon.stub(AwsEcsDetector, '_getUrlAsJson' as any).rejects(error);
+        sinon.stub(AwsEcsDetectorSync, '_getUrlAsJson' as any).rejects(error);
       });
 
-      it('should reject with an error', async () => {
-        try {
-          await awsEcsDetector.detect();
-          throw new Error('Should not have reached here');
-        } catch (err) {
-          assert.strictEqual(err, error);
-        }
+      it('should return empty resource if when there is an error', async () => {
+        const resource = await awsEcsDetector.detect();
+        await resource.waitForAsyncAttributes?.();
+
+        assert.deepStrictEqual(resource.attributes, {});
       });
     });
   });

@@ -16,51 +16,20 @@
 
 import {
   Detector,
-  Resource,
-  ResourceAttributes,
+  IResource,
   ResourceDetectionConfig,
 } from '@opentelemetry/resources';
-import {
-  CloudProviderValues,
-  CloudPlatformValues,
-  SemanticResourceAttributes,
-} from '@opentelemetry/semantic-conventions';
+import { awsLambdaDetectorSync } from './AwsLambdaDetectorSync';
 
 /**
  * The AwsLambdaDetector can be used to detect if a process is running in AWS Lambda
  * and return a {@link Resource} populated with data about the environment.
- * Returns an empty Resource if detection fails.
+ *
+ * @deprecated Use {@link AwsLambdaDetectorSync} class instead
  */
 export class AwsLambdaDetector implements Detector {
-  async detect(_config?: ResourceDetectionConfig): Promise<Resource> {
-    const functionName = process.env.AWS_LAMBDA_FUNCTION_NAME;
-    if (!functionName) {
-      return Resource.empty();
-    }
-
-    const functionVersion = process.env.AWS_LAMBDA_FUNCTION_VERSION;
-    const region = process.env.AWS_REGION;
-
-    const attributes: ResourceAttributes = {
-      [SemanticResourceAttributes.CLOUD_PROVIDER]: String(
-        CloudProviderValues.AWS
-      ),
-      [SemanticResourceAttributes.CLOUD_PLATFORM]: String(
-        CloudPlatformValues.AWS_LAMBDA
-      ),
-    };
-    if (region) {
-      attributes[SemanticResourceAttributes.CLOUD_REGION] = region;
-    }
-
-    if (functionName) {
-      attributes[SemanticResourceAttributes.FAAS_NAME] = functionName;
-    }
-    if (functionVersion) {
-      attributes[SemanticResourceAttributes.FAAS_VERSION] = functionVersion;
-    }
-
-    return new Resource(attributes);
+  detect(_config?: ResourceDetectionConfig): Promise<IResource> {
+    return Promise.resolve(awsLambdaDetectorSync.detect(_config));
   }
 }
 

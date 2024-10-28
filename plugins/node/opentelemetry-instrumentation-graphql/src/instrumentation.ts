@@ -18,7 +18,6 @@ import { context, trace } from '@opentelemetry/api';
 import {
   isWrapped,
   InstrumentationBase,
-  InstrumentationConfig,
   InstrumentationNodeModuleDefinition,
   InstrumentationNodeModuleFile,
   safeExecuteInTheMiddle,
@@ -34,7 +33,6 @@ import {
   executeType,
   parseType,
   validateType,
-  GraphQLInstrumentationParsedConfig,
   OtelExecutionArgs,
   ObjectWithGraphQLData,
   OPERATION_NOT_SUPPORTED,
@@ -50,41 +48,34 @@ import {
   wrapFields,
 } from './utils';
 
-import { VERSION } from './version';
+import { PACKAGE_NAME, PACKAGE_VERSION } from './version';
 import * as api from '@opentelemetry/api';
 import type { PromiseOrValue } from 'graphql/jsutils/PromiseOrValue';
-import { GraphQLInstrumentationConfig } from './types';
+import {
+  GraphQLInstrumentationConfig,
+  GraphQLInstrumentationParsedConfig,
+} from './types';
 
-const DEFAULT_CONFIG: GraphQLInstrumentationConfig = {
+const DEFAULT_CONFIG: GraphQLInstrumentationParsedConfig = {
   mergeItems: false,
   depth: -1,
   allowValues: false,
   ignoreResolveSpans: false,
 };
 
-const supportedVersions = ['>=14'];
+const supportedVersions = ['>=14.0.0 <17'];
 
-export class GraphQLInstrumentation extends InstrumentationBase {
-  constructor(
-    config: GraphQLInstrumentationConfig & InstrumentationConfig = {}
-  ) {
-    super(
-      '@opentelemetry/instrumentation-graphql',
-      VERSION,
-      Object.assign({}, DEFAULT_CONFIG, config)
-    );
-  }
-
-  private _getConfig(): GraphQLInstrumentationParsedConfig {
-    return this._config as GraphQLInstrumentationParsedConfig;
+export class GraphQLInstrumentation extends InstrumentationBase<GraphQLInstrumentationParsedConfig> {
+  constructor(config: GraphQLInstrumentationConfig = {}) {
+    super(PACKAGE_NAME, PACKAGE_VERSION, { ...DEFAULT_CONFIG, ...config });
   }
 
   override setConfig(config: GraphQLInstrumentationConfig = {}) {
-    this._config = Object.assign({}, DEFAULT_CONFIG, config);
+    super.setConfig({ ...DEFAULT_CONFIG, ...config });
   }
 
   protected init() {
-    const module = new InstrumentationNodeModuleDefinition<any>(
+    const module = new InstrumentationNodeModuleDefinition(
       'graphql',
       supportedVersions
     );
@@ -95,16 +86,13 @@ export class GraphQLInstrumentation extends InstrumentationBase {
     return module;
   }
 
-  private _addPatchingExecute(): InstrumentationNodeModuleFile<
-    typeof graphqlTypes
-  > {
-    return new InstrumentationNodeModuleFile<typeof graphqlTypes>(
+  private _addPatchingExecute(): InstrumentationNodeModuleFile {
+    return new InstrumentationNodeModuleFile(
       'graphql/execution/execute.js',
       supportedVersions,
       // cannot make it work with appropriate type as execute function has 2
       //types and/cannot import function but only types
-      (moduleExports: any, moduleVersion) => {
-        this._diag.debug(`Applying patch for graphql@${moduleVersion} execute`);
+      (moduleExports: any) => {
         if (isWrapped(moduleExports.execute)) {
           this._unwrap(moduleExports, 'execute');
         }
@@ -115,61 +103,46 @@ export class GraphQLInstrumentation extends InstrumentationBase {
         );
         return moduleExports;
       },
-      (moduleExports, moduleVersion) => {
+      moduleExports => {
         if (moduleExports) {
-          this._diag.debug(
-            `Removing patch for graphql@${moduleVersion} execute`
-          );
           this._unwrap(moduleExports, 'execute');
         }
       }
     );
   }
 
-  private _addPatchingParser(): InstrumentationNodeModuleFile<
-    typeof graphqlTypes
-  > {
-    return new InstrumentationNodeModuleFile<typeof graphqlTypes>(
+  private _addPatchingParser(): InstrumentationNodeModuleFile {
+    return new InstrumentationNodeModuleFile(
       'graphql/language/parser.js',
       supportedVersions,
-      (moduleExports, moduleVersion) => {
-        this._diag.debug(`Applying patch for graphql@${moduleVersion} parse`);
+      (moduleExports: typeof graphqlTypes) => {
         if (isWrapped(moduleExports.parse)) {
           this._unwrap(moduleExports, 'parse');
         }
         this._wrap(moduleExports, 'parse', this._patchParse());
         return moduleExports;
       },
-      (moduleExports, moduleVersion) => {
+      (moduleExports: typeof graphqlTypes) => {
         if (moduleExports) {
-          this._diag.debug(`Removing patch for graphql@${moduleVersion} parse`);
           this._unwrap(moduleExports, 'parse');
         }
       }
     );
   }
 
-  private _addPatchingValidate(): InstrumentationNodeModuleFile<
-    typeof graphqlTypes
-  > {
-    return new InstrumentationNodeModuleFile<typeof graphqlTypes>(
+  private _addPatchingValidate(): InstrumentationNodeModuleFile {
+    return new InstrumentationNodeModuleFile(
       'graphql/validation/validate.js',
       supportedVersions,
-      (moduleExports, moduleVersion) => {
-        this._diag.debug(
-          `Applying patch for graphql@${moduleVersion} validate`
-        );
+      moduleExports => {
         if (isWrapped(moduleExports.validate)) {
           this._unwrap(moduleExports, 'validate');
         }
         this._wrap(moduleExports, 'validate', this._patchValidate());
         return moduleExports;
       },
-      (moduleExports, moduleVersion) => {
+      moduleExports => {
         if (moduleExports) {
-          this._diag.debug(
-            `Removing patch for graphql@${moduleVersion} validate`
-          );
           this._unwrap(moduleExports, 'validate');
         }
       }
@@ -259,7 +232,7 @@ export class GraphQLInstrumentation extends InstrumentationBase {
     err?: Error,
     result?: PromiseOrValue<graphqlTypes.ExecutionResult>
   ) {
-    const config = this._getConfig();
+    const config = this.getConfig();
     if (result === undefined || err) {
       endSpan(span, err);
       return;
@@ -291,10 +264,14 @@ export class GraphQLInstrumentation extends InstrumentationBase {
     span: api.Span,
     result: graphqlTypes.ExecutionResult
   ) {
-    const config = this._getConfig();
+    const { responseHook } = this.getConfig();
+    if (!responseHook) {
+      return;
+    }
+
     safeExecuteInTheMiddle(
       () => {
-        config.responseHook(span, result);
+        responseHook(span, result);
       },
       err => {
         if (err) {
@@ -350,7 +327,7 @@ export class GraphQLInstrumentation extends InstrumentationBase {
     source: string | graphqlTypes.Source,
     options?: graphqlTypes.ParseOptions
   ): graphqlTypes.DocumentNode {
-    const config = this._getConfig();
+    const config = this.getConfig();
     const span = this.tracer.startSpan(SpanNames.PARSE);
 
     return context.with(trace.setSpan(context.active(), span), () => {
@@ -418,7 +395,7 @@ export class GraphQLInstrumentation extends InstrumentationBase {
     operation: graphqlTypes.DefinitionNode | undefined,
     processedArgs: graphqlTypes.ExecutionArgs
   ): api.Span {
-    const config = this._getConfig();
+    const config = this.getConfig();
 
     const span = this.tracer.startSpan(SpanNames.EXECUTE, {});
     if (operation) {
@@ -478,7 +455,7 @@ export class GraphQLInstrumentation extends InstrumentationBase {
 
     if (
       contextValue[OTEL_GRAPHQL_DATA_SYMBOL] ||
-      this._getConfig().ignoreResolveSpans
+      this.getConfig().ignoreResolveSpans
     ) {
       return {
         schema,
@@ -498,22 +475,14 @@ export class GraphQLInstrumentation extends InstrumentationBase {
     const fieldResolverForExecute = fieldResolver ?? defaultFieldResolved;
     fieldResolver = wrapFieldResolver(
       this.tracer,
-      this._getConfig.bind(this),
+      () => this.getConfig(),
       fieldResolverForExecute,
       isUsingDefaultResolver
     );
 
     if (schema) {
-      wrapFields(
-        schema.getQueryType(),
-        this.tracer,
-        this._getConfig.bind(this)
-      );
-      wrapFields(
-        schema.getMutationType(),
-        this.tracer,
-        this._getConfig.bind(this)
-      );
+      wrapFields(schema.getQueryType(), this.tracer, () => this.getConfig());
+      wrapFields(schema.getMutationType(), this.tracer, () => this.getConfig());
     }
 
     return {

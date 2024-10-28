@@ -30,9 +30,13 @@ import { lookup } from 'dns';
 // @ts-ignore
 const instrumentation = registerInstrumentationTesting(new MongoDBInstrumentation());
 
-import * as mongodb from 'mongodb';
+import type { MongoClient, Collection } from 'mongodb';
 import { assertSpans, accessCollection, DEFAULT_MONGO_HOST } from './utils';
-import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
+import {
+  SEMATTRS_DB_STATEMENT,
+  SEMATTRS_NET_PEER_NAME,
+  SEMATTRS_NET_PEER_PORT,
+} from '@opentelemetry/semantic-conventions';
 
 describe('MongoDBInstrumentation-Tracing-v3', () => {
   function create(config: MongoDBInstrumentationConfig = {}) {
@@ -53,8 +57,8 @@ describe('MongoDBInstrumentation-Tracing-v3', () => {
   const DB_NAME = process.env.MONGODB_DB || 'opentelemetry-tests';
   const COLLECTION_NAME = 'test';
 
-  let client: mongodb.MongoClient;
-  let collection: mongodb.Collection;
+  let client: MongoClient;
+  let collection: Collection;
 
   before(done => {
     shouldTest = true;
@@ -65,9 +69,7 @@ describe('MongoDBInstrumentation-Tracing-v3', () => {
         done();
       })
       .catch((err: Error) => {
-        console.log(
-          'Skipping test-mongodb. Could not connect. Run MongoDB to test'
-        );
+        console.log('Skipping test-mongodb. ' + err.message);
         shouldTest = false;
         done();
       });
@@ -82,6 +84,7 @@ describe('MongoDBInstrumentation-Tracing-v3', () => {
     }
     // Non traced insertion of basic data to perform tests
     const insertData = [{ a: 1 }, { a: 2 }, { a: 3 }];
+    // @ts-expect-error -- v5 removed callback support
     collection.insertMany(insertData, (err: any, result: any) => {
       resetMemoryExporter();
       done();
@@ -90,9 +93,11 @@ describe('MongoDBInstrumentation-Tracing-v3', () => {
 
   afterEach(done => {
     if (shouldTest) {
-      return collection.deleteMany({}, done);
+      // @ts-expect-error -- v5 removed callback support
+      collection.deleteMany({}, done);
+    } else {
+      done();
     }
-    done();
   });
 
   after(() => {
@@ -260,6 +265,32 @@ describe('MongoDBInstrumentation-Tracing-v3', () => {
           });
       });
     });
+
+    it('should create a child span for aggregation', done => {
+      const span = trace.getTracer('default').startSpan('indexRootSpan');
+      context.with(trace.setSpan(context.active(), span), () => {
+        collection
+          .aggregate([
+            { $match: { key: 'value' } },
+            { $group: { _id: '$a', count: { $sum: 1 } } },
+          ])
+          .toArray()
+          .then(() => {
+            span.end();
+            assertSpans(
+              getTestSpans(),
+              'mongodb.aggregate',
+              SpanKind.CLIENT,
+              'aggregate',
+              undefined
+            );
+            done();
+          })
+          .catch(err => {
+            done(err);
+          });
+      });
+    });
   });
 
   describe('when using enhanced database reporting without db statementSerializer', () => {
@@ -293,9 +324,51 @@ describe('MongoDBInstrumentation-Tracing-v3', () => {
             );
             const mongoSpan = spans.find(s => s.name === operationName);
             const dbStatement = JSON.parse(
-              mongoSpan!.attributes[SemanticAttributes.DB_STATEMENT] as string
+              mongoSpan!.attributes[SEMATTRS_DB_STATEMENT] as string
             );
             assert.strictEqual(dbStatement[key], '?');
+            done();
+          })
+          .catch(err => {
+            done(err);
+          });
+      });
+    });
+
+    it('should properly collect nested db statement (hide attribute values)', done => {
+      const span = trace.getTracer('default').startSpan('insertRootSpan');
+      context.with(trace.setSpan(context.active(), span), () => {
+        collection
+          .aggregate([
+            { $match: { key: 'value' } },
+            { $group: { _id: '$a', count: { $sum: 1 } } },
+          ])
+          .toArray()
+          .then(() => {
+            span.end();
+            const spans = getTestSpans();
+            const operationName = 'mongodb.aggregate';
+            assertSpans(
+              spans,
+              operationName,
+              SpanKind.CLIENT,
+              'aggregate',
+              undefined,
+              false,
+              false
+            );
+            const mongoSpan = spans.find(s => s.name === operationName);
+            const dbStatement = JSON.parse(
+              mongoSpan!.attributes[SEMATTRS_DB_STATEMENT] as string
+            );
+            assert.deepEqual(dbStatement, {
+              aggregate: '?',
+              pipeline: [
+                { $match: { key: '?' } },
+                { $group: { _id: '?', count: { $sum: '?' } } },
+              ],
+              cursor: {},
+            });
             done();
           })
           .catch(err => {
@@ -339,7 +412,7 @@ describe('MongoDBInstrumentation-Tracing-v3', () => {
               );
               const mongoSpan = spans.find(s => s.name === operationName);
               const dbStatement = JSON.parse(
-                mongoSpan!.attributes[SemanticAttributes.DB_STATEMENT] as string
+                mongoSpan!.attributes[SEMATTRS_DB_STATEMENT] as string
               );
               assert.strictEqual(dbStatement[key], value);
               done();
@@ -541,8 +614,8 @@ describe('MongoDBInstrumentation-Tracing-v3', () => {
   });
 
   describe('MongoDb useUnifiedTopology enabled', () => {
-    let client: mongodb.MongoClient;
-    let collection: mongodb.Collection;
+    let client: MongoClient;
+    let collection: Collection;
     before(done => {
       accessCollection(URL, DB_NAME, COLLECTION_NAME, {
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -555,9 +628,7 @@ describe('MongoDBInstrumentation-Tracing-v3', () => {
           done();
         })
         .catch((err: Error) => {
-          console.log(
-            'Skipping test-mongodb. Could not connect. Run MongoDB to test'
-          );
+          console.log('Skipping test-mongodb. ' + err.message);
           shouldTest = false;
           done();
         });
@@ -570,6 +641,7 @@ describe('MongoDBInstrumentation-Tracing-v3', () => {
     it('should generate correct span attributes', done => {
       const span = trace.getTracer('default').startSpan('findRootSpan');
       context.with(trace.setSpan(context.active(), span), () => {
+        // @ts-expect-error -- v5 removed callback support
         collection.find({ a: 1 }).toArray((err, results) => {
           span.end();
           const [mongoSpan] = getTestSpans();
@@ -579,11 +651,11 @@ describe('MongoDBInstrumentation-Tracing-v3', () => {
             (err, address) => {
               if (err) return done(err);
               assert.strictEqual(
-                mongoSpan.attributes[SemanticAttributes.NET_PEER_NAME],
+                mongoSpan.attributes[SEMATTRS_NET_PEER_NAME],
                 address
               );
               assert.strictEqual(
-                mongoSpan.attributes[SemanticAttributes.NET_PEER_PORT],
+                mongoSpan.attributes[SEMATTRS_NET_PEER_PORT],
                 process.env.MONGODB_PORT
                   ? parseInt(process.env.MONGODB_PORT)
                   : 27017

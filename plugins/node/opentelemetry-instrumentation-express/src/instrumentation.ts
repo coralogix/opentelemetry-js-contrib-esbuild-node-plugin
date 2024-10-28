@@ -29,17 +29,18 @@ import { AttributeNames } from './enums/AttributeNames';
 import {
   asErrorAndMessage,
   getLayerMetadata,
+  getLayerPath,
   isLayerIgnored,
   storeLayerPath,
 } from './utils';
-import { VERSION } from './version';
+import { PACKAGE_NAME, PACKAGE_VERSION } from './version';
 import {
   InstrumentationBase,
   InstrumentationNodeModuleDefinition,
   isWrapped,
   safeExecuteInTheMiddle,
 } from '@opentelemetry/instrumentation';
-import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
+import { SEMATTRS_HTTP_ROUTE } from '@opentelemetry/semantic-conventions';
 import {
   ExpressLayer,
   ExpressRouter,
@@ -49,32 +50,17 @@ import {
 } from './internal-types';
 
 /** Express instrumentation for OpenTelemetry */
-export class ExpressInstrumentation extends InstrumentationBase<
-  typeof express
-> {
+export class ExpressInstrumentation extends InstrumentationBase<ExpressInstrumentationConfig> {
   constructor(config: ExpressInstrumentationConfig = {}) {
-    super(
-      '@opentelemetry/instrumentation-express',
-      VERSION,
-      Object.assign({}, config)
-    );
-  }
-
-  override setConfig(config: ExpressInstrumentationConfig = {}) {
-    this._config = Object.assign({}, config);
-  }
-
-  override getConfig(): ExpressInstrumentationConfig {
-    return this._config as ExpressInstrumentationConfig;
+    super(PACKAGE_NAME, PACKAGE_VERSION, config);
   }
 
   init() {
     return [
-      new InstrumentationNodeModuleDefinition<typeof express>(
+      new InstrumentationNodeModuleDefinition(
         'express',
-        ['^4.0.0'],
-        (moduleExports, moduleVersion) => {
-          diag.debug(`Applying patch for express@${moduleVersion}`);
+        ['>=4.0.0 <5'],
+        moduleExports => {
           const routerProto = moduleExports.Router as unknown as express.Router;
           // patch express.Router.route
           if (isWrapped(routerProto.route)) {
@@ -99,9 +85,8 @@ export class ExpressInstrumentation extends InstrumentationBase<
           );
           return moduleExports;
         },
-        (moduleExports, moduleVersion) => {
+        moduleExports => {
           if (moduleExports === undefined) return;
-          diag.debug(`Removing patch for express@${moduleVersion}`);
           const routerProto = moduleExports.Router as unknown as express.Router;
           this._unwrap(routerProto, 'route');
           this._unwrap(routerProto, 'use');
@@ -123,10 +108,7 @@ export class ExpressInstrumentation extends InstrumentationBase<
       ) {
         const route = original.apply(this, args);
         const layer = this.stack[this.stack.length - 1] as ExpressLayer;
-        instrumentation._applyPatch(
-          layer,
-          typeof args[0] === 'string' ? args[0] : undefined
-        );
+        instrumentation._applyPatch(layer, getLayerPath(args));
         return route;
       };
     };
@@ -144,10 +126,7 @@ export class ExpressInstrumentation extends InstrumentationBase<
       ) {
         const route = original.apply(this, args);
         const layer = this.stack[this.stack.length - 1] as ExpressLayer;
-        instrumentation._applyPatch(
-          layer,
-          typeof args[0] === 'string' ? args[0] : undefined
-        );
+        instrumentation._applyPatch(layer, getLayerPath(args));
         return route;
       };
     };
@@ -165,11 +144,7 @@ export class ExpressInstrumentation extends InstrumentationBase<
       ) {
         const route = original.apply(this, args);
         const layer = this._router.stack[this._router.stack.length - 1];
-        instrumentation._applyPatch.call(
-          instrumentation,
-          layer,
-          typeof args[0] === 'string' ? args[0] : undefined
-        );
+        instrumentation._applyPatch(layer, getLayerPath(args));
         return route;
       };
     };
@@ -186,10 +161,11 @@ export class ExpressInstrumentation extends InstrumentationBase<
     if (layer[kLayerPatched] === true) return;
     layer[kLayerPatched] = true;
 
-    this._wrap(layer, 'handle', (original: Function) => {
+    this._wrap(layer, 'handle', original => {
       // TODO: instrument error handlers
       if (original.length === 4) return original;
-      return function (
+
+      const patched = function (
         this: ExpressLayer,
         req: PatchedRequest,
         res: express.Response
@@ -197,10 +173,12 @@ export class ExpressInstrumentation extends InstrumentationBase<
         storeLayerPath(req, layerPath);
         const route = (req[_LAYERS_STORE_PROPERTY] as string[])
           .filter(path => path !== '/' && path !== '/*')
-          .join('');
+          .join('')
+          // remove duplicate slashes to normalize route
+          .replace(/\/{2,}/g, '/');
 
         const attributes: Attributes = {
-          [SemanticAttributes.HTTP_ROUTE]: route.length > 0 ? route : '/',
+          [SEMATTRS_HTTP_ROUTE]: route.length > 0 ? route : '/',
         };
         const metadata = getLayerMetadata(layer, layerPath);
         const type = metadata.attributes[
@@ -213,7 +191,7 @@ export class ExpressInstrumentation extends InstrumentationBase<
         }
 
         // verify against the config if the layer should be ignored
-        if (isLayerIgnored(metadata.name, type, instrumentation._config)) {
+        if (isLayerIgnored(metadata.name, type, instrumentation.getConfig())) {
           if (type === ExpressLayerType.MIDDLEWARE) {
             (req[_LAYERS_STORE_PROPERTY] as string[]).pop();
           }
@@ -236,10 +214,11 @@ export class ExpressInstrumentation extends InstrumentationBase<
           attributes: Object.assign(attributes, metadata.attributes),
         });
 
-        if (instrumentation.getConfig().requestHook) {
+        const { requestHook } = instrumentation.getConfig();
+        if (requestHook) {
           safeExecuteInTheMiddle(
             () =>
-              instrumentation.getConfig().requestHook!(span, {
+              requestHook(span, {
                 request: req,
                 layerType: type,
                 route,
@@ -324,18 +303,38 @@ export class ExpressInstrumentation extends InstrumentationBase<
           }
         }
       };
+
+      // `handle` isn't just a regular function in some cases. It also contains
+      // some properties holding metadata and state so we need to proxy them
+      // through through patched function
+      // ref: https://github.com/open-telemetry/opentelemetry-js-contrib/issues/1950
+      // Also some apps/libs do their own patching before OTEL and have these properties
+      // in the proptotype. So we use a `for...in` loop to get own properties and also
+      // any enumerable prop in the prototype chain
+      // ref: https://github.com/open-telemetry/opentelemetry-js-contrib/issues/2271
+      for (const key in original) {
+        Object.defineProperty(patched, key, {
+          get() {
+            return original[key];
+          },
+          set(value) {
+            original[key] = value;
+          },
+        });
+      }
+      return patched;
     });
   }
 
   _getSpanName(info: ExpressRequestInfo, defaultName: string) {
-    const hook = this.getConfig().spanNameHook;
+    const { spanNameHook } = this.getConfig();
 
-    if (!(hook instanceof Function)) {
+    if (!(spanNameHook instanceof Function)) {
       return defaultName;
     }
 
     try {
-      return hook(info, defaultName) ?? defaultName;
+      return spanNameHook(info, defaultName) ?? defaultName;
     } catch (err) {
       diag.error(
         'express instrumentation: error calling span name rewrite hook',

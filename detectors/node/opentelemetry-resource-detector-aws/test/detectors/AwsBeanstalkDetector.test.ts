@@ -16,12 +16,12 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { awsBeanstalkDetector, AwsBeanstalkDetector } from '../../src';
+import { awsBeanstalkDetector, AwsBeanstalkDetectorSync } from '../../src';
 import {
   assertEmptyResource,
   assertServiceResource,
 } from '@opentelemetry/contrib-test-utils';
-import { CloudPlatformValues } from '@opentelemetry/semantic-conventions';
+import { CLOUDPLATFORMVALUES_AWS_ELASTIC_BEANSTALK } from '@opentelemetry/semantic-conventions';
 
 describe('BeanstalkResourceDetector', () => {
   const err = new Error('failed to read config file');
@@ -45,20 +45,21 @@ describe('BeanstalkResourceDetector', () => {
 
   it('should successfully return resource data', async () => {
     fileStub = sinon
-      .stub(AwsBeanstalkDetector, 'fileAccessAsync' as any)
+      .stub(AwsBeanstalkDetectorSync, 'fileAccessAsync' as any)
       .resolves();
     readStub = sinon
-      .stub(AwsBeanstalkDetector, 'readFileAsync' as any)
+      .stub(AwsBeanstalkDetectorSync, 'readFileAsync' as any)
       .resolves(JSON.stringify(data));
     sinon.stub(JSON, 'parse').returns(data);
 
     const resource = await awsBeanstalkDetector.detect();
+    await resource.waitForAsyncAttributes?.();
 
     sinon.assert.calledOnce(fileStub);
     sinon.assert.calledOnce(readStub);
     assert.ok(resource);
     assertServiceResource(resource, {
-      name: CloudPlatformValues.AWS_ELASTIC_BEANSTALK,
+      name: CLOUDPLATFORMVALUES_AWS_ELASTIC_BEANSTALK,
       namespace: 'scorekeep',
       version: 'app-5a56-170119_190650-stage-170119_190650',
       instanceId: '32',
@@ -67,20 +68,21 @@ describe('BeanstalkResourceDetector', () => {
 
   it('should successfully return resource data with noise', async () => {
     fileStub = sinon
-      .stub(AwsBeanstalkDetector, 'fileAccessAsync' as any)
+      .stub(AwsBeanstalkDetectorSync, 'fileAccessAsync' as any)
       .resolves();
     readStub = sinon
-      .stub(AwsBeanstalkDetector, 'readFileAsync' as any)
+      .stub(AwsBeanstalkDetectorSync, 'readFileAsync' as any)
       .resolves(JSON.stringify(noisyData));
     sinon.stub(JSON, 'parse').returns(noisyData);
 
     const resource = await awsBeanstalkDetector.detect();
+    await resource.waitForAsyncAttributes?.();
 
     sinon.assert.calledOnce(fileStub);
     sinon.assert.calledOnce(readStub);
     assert.ok(resource);
     assertServiceResource(resource, {
-      name: CloudPlatformValues.AWS_ELASTIC_BEANSTALK,
+      name: CLOUDPLATFORMVALUES_AWS_ELASTIC_BEANSTALK,
       namespace: 'scorekeep',
       version: 'app-5a56-170119_190650-stage-170119_190650',
       instanceId: '32',
@@ -89,13 +91,14 @@ describe('BeanstalkResourceDetector', () => {
 
   it('should return empty resource when failing to read file', async () => {
     fileStub = sinon
-      .stub(AwsBeanstalkDetector, 'fileAccessAsync' as any)
+      .stub(AwsBeanstalkDetectorSync, 'fileAccessAsync' as any)
       .resolves();
     readStub = sinon
-      .stub(AwsBeanstalkDetector, 'readFileAsync' as any)
+      .stub(AwsBeanstalkDetectorSync, 'readFileAsync' as any)
       .rejects(err);
 
     const resource = await awsBeanstalkDetector.detect();
+    await resource.waitForAsyncAttributes?.();
 
     sinon.assert.calledOnce(fileStub);
     sinon.assert.calledOnce(readStub);
@@ -105,13 +108,14 @@ describe('BeanstalkResourceDetector', () => {
 
   it('should return empty resource when config file does not exist', async () => {
     fileStub = sinon
-      .stub(AwsBeanstalkDetector, 'fileAccessAsync' as any)
+      .stub(AwsBeanstalkDetectorSync, 'fileAccessAsync' as any)
       .rejects(err);
     readStub = sinon
-      .stub(AwsBeanstalkDetector, 'readFileAsync' as any)
+      .stub(AwsBeanstalkDetectorSync, 'readFileAsync' as any)
       .resolves(JSON.stringify(data));
 
     const resource = await awsBeanstalkDetector.detect();
+    await resource.waitForAsyncAttributes?.();
 
     sinon.assert.calledOnce(fileStub);
     sinon.assert.notCalled(readStub);

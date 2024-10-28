@@ -35,6 +35,7 @@ import { GrpcInstrumentation } from '@opentelemetry/instrumentation-grpc';
 import { HapiInstrumentation } from '@opentelemetry/instrumentation-hapi';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { IORedisInstrumentation } from '@opentelemetry/instrumentation-ioredis';
+import { KafkaJsInstrumentation } from '@opentelemetry/instrumentation-kafkajs';
 import { KnexInstrumentation } from '@opentelemetry/instrumentation-knex';
 import { KoaInstrumentation } from '@opentelemetry/instrumentation-koa';
 import { LruMemoizerInstrumentation } from '@opentelemetry/instrumentation-lru-memoizer';
@@ -53,6 +54,7 @@ import { RestifyInstrumentation } from '@opentelemetry/instrumentation-restify';
 import { RouterInstrumentation } from '@opentelemetry/instrumentation-router';
 import { SocketIoInstrumentation } from '@opentelemetry/instrumentation-socket.io';
 import { TediousInstrumentation } from '@opentelemetry/instrumentation-tedious';
+import { UndiciInstrumentation } from '@opentelemetry/instrumentation-undici';
 import { WinstonInstrumentation } from '@opentelemetry/instrumentation-winston';
 
 import { alibabaCloudEcsDetector } from '@opentelemetry/resource-detector-alibaba-cloud';
@@ -72,15 +74,23 @@ import {
   hostDetectorSync,
   osDetectorSync,
   processDetectorSync,
+  serviceInstanceIdDetectorSync,
 } from '@opentelemetry/resources';
+import {
+  azureAppServiceDetector,
+  azureFunctionsDetector,
+  azureVmDetector,
+} from '@opentelemetry/resource-detector-azure';
 
 const RESOURCE_DETECTOR_CONTAINER = 'container';
 const RESOURCE_DETECTOR_ENVIRONMENT = 'env';
 const RESOURCE_DETECTOR_HOST = 'host';
 const RESOURCE_DETECTOR_OS = 'os';
+const RESOURCE_DETECTOR_SERVICE_INSTANCE_ID = 'serviceinstance';
 const RESOURCE_DETECTOR_PROCESS = 'process';
 const RESOURCE_DETECTOR_ALIBABA = 'alibaba';
 const RESOURCE_DETECTOR_AWS = 'aws';
+const RESOURCE_DETECTOR_AZURE = 'azure';
 const RESOURCE_DETECTOR_GCP = 'gcp';
 
 const InstrumentationMap = {
@@ -103,6 +113,7 @@ const InstrumentationMap = {
   '@opentelemetry/instrumentation-hapi': HapiInstrumentation,
   '@opentelemetry/instrumentation-http': HttpInstrumentation,
   '@opentelemetry/instrumentation-ioredis': IORedisInstrumentation,
+  '@opentelemetry/instrumentation-kafkajs': KafkaJsInstrumentation,
   '@opentelemetry/instrumentation-knex': KnexInstrumentation,
   '@opentelemetry/instrumentation-koa': KoaInstrumentation,
   '@opentelemetry/instrumentation-lru-memoizer': LruMemoizerInstrumentation,
@@ -121,6 +132,7 @@ const InstrumentationMap = {
   '@opentelemetry/instrumentation-router': RouterInstrumentation,
   '@opentelemetry/instrumentation-socket.io': SocketIoInstrumentation,
   '@opentelemetry/instrumentation-tedious': TediousInstrumentation,
+  '@opentelemetry/instrumentation-undici': UndiciInstrumentation,
   '@opentelemetry/instrumentation-winston': WinstonInstrumentation,
 };
 
@@ -135,12 +147,9 @@ export type InstrumentationConfigMap = {
 export function getNodeAutoInstrumentations(
   inputConfigs: InstrumentationConfigMap = {}
 ): Instrumentation[] {
-  for (const name of Object.keys(inputConfigs)) {
-    if (!Object.prototype.hasOwnProperty.call(InstrumentationMap, name)) {
-      diag.error(`Provided instrumentation name "${name}" not found`);
-      continue;
-    }
-  }
+  checkManuallyProvidedInstrumentationNames(Object.keys(inputConfigs));
+  const enabledInstrumentationsFromEnv = getEnabledInstrumentationsFromEnv();
+  const disabledInstrumentationsFromEnv = getDisabledInstrumentationsFromEnv();
 
   const instrumentations: Instrumentation[] = [];
 
@@ -151,7 +160,11 @@ export function getNodeAutoInstrumentations(
     // Defaults are defined by the instrumentation itself
     const userConfig: any = inputConfigs[name] ?? {};
 
-    if (userConfig.enabled === false) {
+    if (
+      userConfig.enabled === false ||
+      !enabledInstrumentationsFromEnv.includes(name) ||
+      disabledInstrumentationsFromEnv.includes(name)
+    ) {
       diag.debug(`Disabling instrumentation for ${name}`);
       continue;
     }
@@ -167,15 +180,70 @@ export function getNodeAutoInstrumentations(
   return instrumentations;
 }
 
+function checkManuallyProvidedInstrumentationNames(
+  manuallyProvidedInstrumentationNames: string[]
+) {
+  for (const name of manuallyProvidedInstrumentationNames) {
+    if (!Object.prototype.hasOwnProperty.call(InstrumentationMap, name)) {
+      diag.error(`Provided instrumentation name "${name}" not found`);
+    }
+  }
+}
+
+function getInstrumentationsFromEnv(envVar: string): string[] {
+  const envVarValue = process.env[envVar];
+  if (envVarValue == null) {
+    return [];
+  }
+
+  const instrumentationsFromEnv = envVarValue
+    ?.split(',')
+    .map(
+      instrumentationPkgSuffix =>
+        `@opentelemetry/instrumentation-${instrumentationPkgSuffix.trim()}`
+    );
+  checkManuallyProvidedInstrumentationNames(instrumentationsFromEnv);
+  return instrumentationsFromEnv;
+}
+
+/**
+ * Returns the list of instrumentations that are enabled based on the environment variable.
+ */
+function getEnabledInstrumentationsFromEnv() {
+  if (!process.env.OTEL_NODE_ENABLED_INSTRUMENTATIONS) {
+    return Object.keys(InstrumentationMap);
+  }
+
+  const instrumentationsFromEnv = getInstrumentationsFromEnv(
+    'OTEL_NODE_ENABLED_INSTRUMENTATIONS'
+  );
+  return instrumentationsFromEnv;
+}
+
+/**
+ * Returns the list of instrumentations that are disabled based on the environment variable.
+ */
+function getDisabledInstrumentationsFromEnv() {
+  if (!process.env.OTEL_NODE_DISABLED_INSTRUMENTATIONS) {
+    return [];
+  }
+
+  const instrumentationsFromEnv = getInstrumentationsFromEnv(
+    'OTEL_NODE_DISABLED_INSTRUMENTATIONS'
+  );
+  return instrumentationsFromEnv;
+}
+
 export function getResourceDetectorsFromEnv(): Array<Detector | DetectorSync> {
   const resourceDetectors = new Map<
     string,
-    Detector | DetectorSync | Detector[]
+    Detector | DetectorSync | Detector[] | DetectorSync[]
   >([
     [RESOURCE_DETECTOR_CONTAINER, containerDetector],
     [RESOURCE_DETECTOR_ENVIRONMENT, envDetectorSync],
     [RESOURCE_DETECTOR_HOST, hostDetectorSync],
     [RESOURCE_DETECTOR_OS, osDetectorSync],
+    [RESOURCE_DETECTOR_SERVICE_INSTANCE_ID, serviceInstanceIdDetectorSync],
     [RESOURCE_DETECTOR_PROCESS, processDetectorSync],
     [RESOURCE_DETECTOR_ALIBABA, alibabaCloudEcsDetector],
     [RESOURCE_DETECTOR_GCP, gcpDetector],
@@ -188,6 +256,10 @@ export function getResourceDetectorsFromEnv(): Array<Detector | DetectorSync> {
         awsBeanstalkDetector,
         awsLambdaDetector,
       ],
+    ],
+    [
+      RESOURCE_DETECTOR_AZURE,
+      [azureAppServiceDetector, azureFunctionsDetector, azureVmDetector],
     ],
   ]);
 

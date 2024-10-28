@@ -47,7 +47,7 @@ import {
 } from 'aws-lambda';
 
 import { AwsLambdaInstrumentationConfig } from './types';
-import { VERSION } from './version';
+import { PACKAGE_NAME, PACKAGE_VERSION } from './version';
 import { env } from 'process';
 import {
   finalizeSpan,
@@ -83,13 +83,13 @@ type InstrumentationContext = {
   invocationParentContext: OtelContext; 
 }
 
-export class AwsLambdaInstrumentation extends InstrumentationBase {
+export class AwsLambdaInstrumentation extends InstrumentationBase<AwsLambdaInstrumentationConfig> {
   private _traceForceFlusher?: () => Promise<void>;
   private _metricForceFlusher?: () => Promise<void>;
+  private config: AwsLambdaInstrumentationConfig;
 
-  constructor(protected override _config: AwsLambdaInstrumentationConfig = {}) {
-    super('@opentelemetry/instrumentation-aws-lambda', VERSION, _config);
-    if (this._config.disableAwsContextPropagation == null) {
+  constructor(config: AwsLambdaInstrumentationConfig = {}) {
+    if (config.disableAwsContextPropagation == null) {
       if (
         typeof env['OTEL_LAMBDA_DISABLE_AWS_CONTEXT_PROPAGATION'] ===
           'string' &&
@@ -97,13 +97,12 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
           'OTEL_LAMBDA_DISABLE_AWS_CONTEXT_PROPAGATION'
         ].toLocaleLowerCase() === 'true'
       ) {
-        this._config.disableAwsContextPropagation = true;
+        config = { ...config, disableAwsContextPropagation: true };
       }
     }
-  }
 
-  override setConfig(config: AwsLambdaInstrumentationConfig = {}) {
-    this._config = config;
+    super(PACKAGE_NAME, PACKAGE_VERSION, config);
+    this.config = config;
   }
 
   init() {
@@ -287,7 +286,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     event: unknown,
     parentContext: OtelContext
   ): { triggerOrigin: TriggerOrigin; triggerSpan: Span } | undefined {
-    if (this._config.detectTrigger === false) {
+    if (this.config.detectTrigger === false) {
       return undefined;
     }
     const trigger = getEventTrigger(event);
@@ -324,7 +323,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       }
 
       if (triggerOrigin) {
-        finalizeSpan(this._config, triggerOrigin, span, lambdaResponse);
+        finalizeSpan(this.config, triggerOrigin, span, lambdaResponse);
       }
       span.end();
     } else {
@@ -345,9 +344,9 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
       invocationParentContext
     );
 
-    if (this._config.requestHook) {
+    if (this.config.requestHook) {
       try {
-        this._config.requestHook!(invocationSpan, { event, context })
+        this.config.requestHook!(invocationSpan, { event, context })
       } catch (e) {
         diag.error('aws-lambda instrumentation: requestHook error', e)
       }
@@ -480,9 +479,10 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     err?: Error | string | null,
     res?: any
   ): void {
-    if (this._config?.responseHook) {
+    const responseHook = this.config?.responseHook;
+    if (responseHook) {
       safeExecuteInTheMiddle(
-        () => this._config.responseHook!(span, { err, res }),
+        () => responseHook(span, { err, res }),
         e => {
           if (e)
             diag.error('aws-lambda instrumentation: responseHook error', e);
@@ -503,7 +503,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
     context: Context,
   ): OtelContext {
     let parent: OtelContext | undefined = undefined;
-    if (!this._config.disableAwsContextPropagation) {
+    if (!this.config.disableAwsContextPropagation) {
       const lambdaTraceHeader = process.env[traceContextEnvironmentKey];
       if (lambdaTraceHeader) {
         parent = awsPropagator.extract(
@@ -525,7 +525,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase {
         }
       }
     }
-    const eventContextExtractor = this._config.eventContextExtractor || AwsLambdaInstrumentation._defaultEventContextExtractor
+    const eventContextExtractor = this.config.eventContextExtractor || AwsLambdaInstrumentation._defaultEventContextExtractor
     const extractedContext = safeExecuteInTheMiddle(
       () => eventContextExtractor(event, context),
       e => {

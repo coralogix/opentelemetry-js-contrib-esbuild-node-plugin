@@ -22,33 +22,27 @@ import {
   safeExecuteInTheMiddle,
 } from '@opentelemetry/instrumentation';
 import { BunyanInstrumentationConfig } from './types';
-import { VERSION } from './version';
+import { PACKAGE_NAME, PACKAGE_VERSION } from './version';
 import { OpenTelemetryBunyanStream } from './OpenTelemetryBunyanStream';
 import type * as BunyanLogger from 'bunyan';
+import { SeverityNumber } from '@opentelemetry/api-logs';
 
 const DEFAULT_CONFIG: BunyanInstrumentationConfig = {
   disableLogSending: false,
   disableLogCorrelation: false,
 };
 
-export class BunyanInstrumentation extends InstrumentationBase<
-  typeof BunyanLogger
-> {
+export class BunyanInstrumentation extends InstrumentationBase<BunyanInstrumentationConfig> {
   constructor(config: BunyanInstrumentationConfig = {}) {
-    super(
-      '@opentelemetry/instrumentation-bunyan',
-      VERSION,
-      Object.assign({}, DEFAULT_CONFIG, config)
-    );
+    super(PACKAGE_NAME, PACKAGE_VERSION, { ...DEFAULT_CONFIG, ...config });
   }
 
   protected init() {
     return [
-      new InstrumentationNodeModuleDefinition<typeof BunyanLogger>(
+      new InstrumentationNodeModuleDefinition(
         'bunyan',
-        ['<2.0'],
-        (module: any, moduleVersion) => {
-          this._diag.debug(`Applying patch for bunyan@${moduleVersion}`);
+        ['>=1.0.0 <2'],
+        (module: any) => {
           const instrumentation = this;
           const Logger =
             module[Symbol.toStringTag] === 'Module'
@@ -101,12 +95,8 @@ export class BunyanInstrumentation extends InstrumentationBase<
     ];
   }
 
-  override getConfig(): BunyanInstrumentationConfig {
-    return this._config;
-  }
-
-  override setConfig(config: BunyanInstrumentationConfig) {
-    this._config = Object.assign({}, DEFAULT_CONFIG, config);
+  override setConfig(config: BunyanInstrumentationConfig = {}) {
+    super.setConfig({ ...DEFAULT_CONFIG, ...config });
   }
 
   private _getPatchedEmit() {
@@ -152,27 +142,32 @@ export class BunyanInstrumentation extends InstrumentationBase<
   }
 
   private _addStream(logger: any) {
-    const config: BunyanInstrumentationConfig = this.getConfig();
+    const config = this.getConfig();
     if (!this.isEnabled() || config.disableLogSending) {
       return;
     }
     this._diag.debug('Adding OpenTelemetryBunyanStream to logger');
+    let streamLevel = logger.level();
+    if (config.logSeverity) {
+      const bunyanLevel = bunyanLevelFromSeverity(config.logSeverity);
+      streamLevel = bunyanLevel || streamLevel;
+    }
     logger.addStream({
       type: 'raw',
       stream: new OpenTelemetryBunyanStream(),
-      level: logger.level(),
+      level: streamLevel,
     });
   }
 
   private _callHook(span: Span, record: Record<string, string>) {
-    const hook = this.getConfig().logHook;
+    const { logHook } = this.getConfig();
 
-    if (typeof hook !== 'function') {
+    if (typeof logHook !== 'function') {
       return;
     }
 
     safeExecuteInTheMiddle(
-      () => hook(span, record),
+      () => logHook(span, record),
       err => {
         if (err) {
           this._diag.error('error calling logHook', err);
@@ -181,4 +176,21 @@ export class BunyanInstrumentation extends InstrumentationBase<
       true
     );
   }
+}
+
+function bunyanLevelFromSeverity(severity: SeverityNumber): string | undefined {
+  if (severity >= SeverityNumber.FATAL) {
+    return 'fatal';
+  } else if (severity >= SeverityNumber.ERROR) {
+    return 'error';
+  } else if (severity >= SeverityNumber.WARN) {
+    return 'warn';
+  } else if (severity >= SeverityNumber.INFO) {
+    return 'info';
+  } else if (severity >= SeverityNumber.DEBUG) {
+    return 'debug';
+  } else if (severity >= SeverityNumber.TRACE) {
+    return 'trace';
+  }
+  return;
 }

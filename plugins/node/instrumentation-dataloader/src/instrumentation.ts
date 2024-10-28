@@ -20,7 +20,6 @@ import {
   isWrapped,
 } from '@opentelemetry/instrumentation';
 import {
-  diag,
   trace,
   context,
   Link,
@@ -28,7 +27,7 @@ import {
   SpanKind,
 } from '@opentelemetry/api';
 import { DataloaderInstrumentationConfig } from './types';
-import { VERSION } from './version';
+import { PACKAGE_NAME, PACKAGE_VERSION } from './version';
 import type * as Dataloader from 'dataloader';
 
 const MODULE_NAME = 'dataloader';
@@ -44,27 +43,23 @@ type DataloaderInternal = typeof Dataloader.prototype & {
 type LoadFn = (typeof Dataloader.prototype)['load'];
 type LoadManyFn = (typeof Dataloader.prototype)['loadMany'];
 
-export class DataloaderInstrumentation extends InstrumentationBase {
+export class DataloaderInstrumentation extends InstrumentationBase<DataloaderInstrumentationConfig> {
   constructor(config: DataloaderInstrumentationConfig = {}) {
-    super('@opentelemetry/instrumentation-dataloader', VERSION, config);
+    super(PACKAGE_NAME, PACKAGE_VERSION, config);
   }
 
   protected init() {
     return [
-      new InstrumentationNodeModuleDefinition<typeof Dataloader>(
+      new InstrumentationNodeModuleDefinition(
         MODULE_NAME,
-        ['^2.0.0'],
-        (dataloader, moduleVersion) => {
-          diag.debug(`Applying patch for ${MODULE_NAME}@${moduleVersion}`);
-
+        ['>=2.0.0 <3'],
+        dataloader => {
           this._patchLoad(dataloader.prototype);
           this._patchLoadMany(dataloader.prototype);
 
           return this._getPatchedConstructor(dataloader);
         },
-        (dataloader, moduleVersion) => {
-          diag.debug(`Removing patch for ${MODULE_NAME}@${moduleVersion}`);
-
+        dataloader => {
           if (isWrapped(dataloader.prototype.load)) {
             this._unwrap(dataloader.prototype, 'load');
           }
@@ -73,17 +68,8 @@ export class DataloaderInstrumentation extends InstrumentationBase {
             this._unwrap(dataloader.prototype, 'loadMany');
           }
         }
-        // cast it to module definition of unknown type to avoid exposing Dataloader types on public APIs
-      ) as InstrumentationNodeModuleDefinition<unknown>,
+      ) as InstrumentationNodeModuleDefinition,
     ];
-  }
-
-  override getConfig(): DataloaderInstrumentationConfig {
-    return this._config;
-  }
-
-  override setConfig(config: DataloaderInstrumentationConfig) {
-    this._config = config;
   }
 
   private shouldCreateSpans(): boolean {
