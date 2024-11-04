@@ -141,6 +141,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase<AwsLambdaInstr
                 diag.debug('handler threw synchronously');
                 self._after_execution(instrCtx, err, undefined).then(() => {
                   context.callbackWaitsForEmptyEventLoop = false;
+                  diag.debug('calling AWS callback');
                   callback(err, undefined);
                 });
                 return;
@@ -154,12 +155,14 @@ export class AwsLambdaInstrumentation extends InstrumentationBase<AwsLambdaInstr
                     diag.debug('handler promise completed');
                     await self._after_execution(instrCtx, undefined, value);
                     context.callbackWaitsForEmptyEventLoop = false;
+                    diag.debug('calling AWS callback');
                     callback(undefined, value);
                   },
                   async (err: Error | string) => {
                     diag.debug('handler promise failed');
                     await self._after_execution(instrCtx, err, undefined);
                     context.callbackWaitsForEmptyEventLoop = false;
+                    diag.debug('calling AWS callback');
                     callback(err, undefined);
                   }
                 );
@@ -173,6 +176,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase<AwsLambdaInstr
           diag.error('_before_execution failed', err);
           await self._after_execution(undefined, err, undefined);
           context.callbackWaitsForEmptyEventLoop = false;
+          diag.debug('calling AWS callback');
           callback(err, undefined);
         }
       )
@@ -223,6 +227,7 @@ export class AwsLambdaInstrumentation extends InstrumentationBase<AwsLambdaInstr
     }
 
     await this._flush()
+    diag.debug('_after_execution completed');
   }
 
   // never fails
