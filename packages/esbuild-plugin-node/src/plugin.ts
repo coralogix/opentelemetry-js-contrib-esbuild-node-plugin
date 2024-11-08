@@ -54,10 +54,19 @@ export function openTelemetryPlugin(
           return;
         }
 
-        const { path, extractedModule } = extractPackageAndModulePath(
-          args.path,
-          args.resolveDir
-        );
+        var path;
+        var extractedModule;
+
+        try {
+          const result = extractPackageAndModulePath(
+            args.path,
+            args.resolveDir
+          );
+          path = result.path;
+          extractedModule = result.extractedModule;
+        } catch (e) {
+          console.log(`Couldn't resolve ${args.path}. This may be an optional dependency.`);
+        }
 
         // If it's a local import, don't patch it
         if (!extractedModule) return;

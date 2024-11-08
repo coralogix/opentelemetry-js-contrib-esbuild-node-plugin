@@ -23,7 +23,7 @@
     "compile": "tsc -p .",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
-    "precompile": "tsc --version && lerna run version:update --scope @opentelemetry/esbuild-plugin-node --include-dependencies",
+    "precompile": "tsc --version",
     "prewatch": "npm run precompile",
     "prepublishOnly": "npm run compile",
     "tdd": "yarn test -- --watch-extensions ts --watch",
@@ -41,7 +41,9 @@
     "@opentelemetry/sdk-node": "^0.52.0",
     "@types/mocha": "7.0.2",
     "@types/node": "18.6.5",
+    "@types/semver": "^7.5.8",
     "fastify": "4.15.0",
+    "graphql": "^16.9.0",
     "mocha": "7.2.0",
     "nyc": "15.1.0",
     "pino": "^8.19.0",
@@ -50,8 +52,8 @@
     "typescript": "4.4.4"
   },
   "dependencies": {
-    "@opentelemetry/auto-instrumentations-node": "0.47.1",
-    "@opentelemetry/instrumentation": "^0.52.0",
+    "@opentelemetry/auto-instrumentations-node": "0.50.0",
+    "@opentelemetry/instrumentation": "0.53.0",
     "esbuild": "0.21.x"
   },
   "files": [
