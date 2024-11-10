@@ -84,7 +84,7 @@ export function openTelemetryPlugin(
         if (!moduleVersion) return;
 
         // See if we have an instrumentation registered for this package
-        const matchingInstrumentation = await getInstrumentation({
+        const matchingInstrumentation = getInstrumentation({
           extractedModule,
           moduleVersion,
           path: args.path,
@@ -239,7 +239,7 @@ async function getModuleVersion({
   return JSON.parse(packageJsonContents.toString()).version;
 }
 
-async function getInstrumentation({
+function getInstrumentation({
   extractedModule,
   path,
   moduleVersion,
@@ -247,7 +247,7 @@ async function getInstrumentation({
   extractedModule: ExtractedModule;
   path: string;
   moduleVersion: string;
-}): Promise<InstrumentationModuleDefinition | null> {
+}): InstrumentationModuleDefinition | null {
   for (const instrumentationModuleDefinition of instrumentationModuleDefinitions) {
     const fullModulePath = `${extractedModule.package}/${extractedModule.path}`;
     const nameMatches =
