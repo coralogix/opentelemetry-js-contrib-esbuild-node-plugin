@@ -13,6 +13,8 @@ jobs:
           node-version: 18
           registry-url: https://registry.npmjs.org/
       - run: npm prune --production
+        working-directory: ./packages/esbuild-plugin-node
       - run: npm publish --access public
+        working-directory: ./packages/esbuild-plugin-node
         env:
           NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
