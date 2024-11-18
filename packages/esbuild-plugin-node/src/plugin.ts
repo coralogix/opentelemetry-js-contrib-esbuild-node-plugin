@@ -67,7 +67,7 @@ export function openTelemetryPlugin(
           path = result.path;
           extractedModule = result.extractedModule;
         } catch (e) {
-          console.log(`Couldn't resolve ${args.path}. This may be an optional dependency.`);
+          // console.log(`Couldn't resolve ${args.path}. This may be an optional dependency.`);
         }
 
         // If it's a local import, don't patch it
