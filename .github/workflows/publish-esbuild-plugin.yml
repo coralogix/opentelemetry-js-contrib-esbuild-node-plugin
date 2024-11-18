@@ -12,8 +12,6 @@ jobs:
         with:
           node-version: 18
           registry-url: https://registry.npmjs.org/
-      - run: 
-        working-directory: ./packages/esbuild-plugin-node
       - run: |
             npm install
             npm publish --access public
