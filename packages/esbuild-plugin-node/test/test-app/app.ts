@@ -29,7 +29,7 @@ const redisClient = createClient({ url: process.env.REDIS_URL });
 server.get('/test', async req => {
   req.log.info({ hi: 'there' }, 'Log message from handler');
 
-  await redisClient.get('key').catch(() => void 0);
+  await redisClient.get('key');
 
   return { hi: 'there' };
 });
