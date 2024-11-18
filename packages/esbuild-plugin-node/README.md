@@ -1,6 +1,7 @@
 # OpenTelemetry Esbuild for Node
 
-[![NPM Published Version][npm-img]][npm-url]
+This is a fork of the awesome [@opentelemetry/esbuild-plugin-node](https://github.com/open-telemetry/opentelemetry-js-contrib/pull/1856) created by [drewcorlin1](https://github.com/drewcorlin1).
+
 [![Apache License][license-image]][license-url]
 
 ## About
@@ -16,7 +17,7 @@ Compatible with OpenTelemetry JS API and SDK `1.0+`.
 ## Installation
 
 ```bash
-npm install --save @opentelemetry/esbuild-plugin-node
+npm install --save @coralogix/esbuild-plugin-node
 ```
 
 ## Usage: Esbuild plugin
@@ -28,7 +29,7 @@ Please see the [Supported Instrumentations](#supported-instrumentations) section
 Enable auto instrumentation by configuring it in your esbuild script:
 
 ```javascript
-const { openTelemetryPlugin } = require('@opentelemetry/esbuild-plugin-node');
+const { openTelemetryPlugin } = require('@coralogix/esbuild-plugin-node');
 const { build } = require('esbuild');
 
 build({
@@ -49,7 +50,7 @@ OpenTelemetry Meta Packages for Node automatically loads instrumentations for No
 Enable auto instrumentation by configuring it in your esbuild script:
 
 ```javascript
-const { openTelemetryPlugin } = require('@opentelemetry/esbuild-plugin-node');
+const { openTelemetryPlugin } = require('@coralogix/esbuild-plugin-node');
 const { build } = require('esbuild');
 
 build({
@@ -66,7 +67,7 @@ build({
 Custom configuration for each of the instrumentations can be passed to the plugin, by providing an object with the name of the instrumentation as a key, and its configuration as the value.
 
 ```javascript
-const { openTelemetryPlugin } = require('@opentelemetry/esbuild-plugin-node');
+const { openTelemetryPlugin } = require('@coralogix/esbuild-plugin-node');
 const { build } = require('esbuild');
 
 build({
@@ -79,7 +80,7 @@ build({
   plugins: [
     openTelemetryPlugin({
       instrumentationConfig: {
-        '@opentelemetry/instrumentation-aws-sdk': {
+        '@coralogix/instrumentation-aws-sdk': {
           suppressInternalInstrumentation: true,
         },
       },
@@ -103,14 +104,14 @@ The reason for this is that the current mechanism of instrumenting packages invo
 ```javascript
 const {
   getNodeAutoInstrumentations,
-} = require('@opentelemetry/auto-instrumentations-node');
+} = require('@coralogix/auto-instrumentations-node');
 const {
   AsyncHooksContextManager,
-} = require('@opentelemetry/context-async-hooks');
+} = require('@coralogix/context-async-hooks');
 const {
   OTLPTraceExporter,
-} = require('@opentelemetry/exporter-trace-otlp-http');
-const { NodeSDK } = require('@opentelemetry/sdk-node');
+} = require('@coralogix/exporter-trace-otlp-http');
+const { NodeSDK } = require('@coralogix/sdk-node');
 
 const instrumentations = getNodeAutoInstrumentations();
 
@@ -129,7 +130,7 @@ process.on('SIGTERM', () => {
 
 ## Supported instrumentations
 
-See [@opentelemetry/auto-instrumentations-node](https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/metapackages/auto-instrumentations-node) for the supported packages.
+See [@coralogix/auto-instrumentations-node](https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/metapackages/auto-instrumentations-node) for the supported packages.
 
 Note that Node.js builtin modules will not be patched by this plugin.
 
@@ -145,7 +146,7 @@ APACHE 2.0 - See [LICENSE][license-url] for more information.
 
 [license-url]: https://github.com/open-telemetry/opentelemetry-js-contrib/blob/main/LICENSE
 [license-image]: https://img.shields.io/badge/license-Apache_2.0-green.svg?style=flat
-[npm-url]: https://www.npmjs.com/package/@opentelemetry/auto-instrumentations-node
+[npm-url]: https://www.npmjs.com/package/@coralogix/auto-instrumentations-node
 [npm-img]: https://badge.fury.io/js/%40opentelemetry%2Fauto-instrumentations-node.svg
 [env-var-url]: https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/configuration/sdk-environment-variables.md#general-sdk-configuration
 [exporter-url]: https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/configuration/sdk-environment-variables.md#otlp-exporter
