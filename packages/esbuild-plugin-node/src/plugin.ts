@@ -118,6 +118,9 @@ export function openTelemetryPlugin(
             pluginConfig?.instrumentationConfig?.[
               config.oTelInstrumentationPackage
             ];
+          if (packageConfig?.enabled === false) {
+            return;
+          }
           const extractedModule = pluginData.extractedModule;
 
           return {
