@@ -1,9 +1,9 @@
 {
   "name": "@coralogix/esbuild-plugin-node",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Metapackage which bundles opentelemetry node core and contrib instrumentations via an esbuild plugin",
   "author": "OpenTelemetry Authors",
-  "homepage": "https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/metapackages/esbuild-plugin-node#readme",
+  "homepage": "https://github.com/coralogix/opentelemetry-js-contrib/tree/coralogix-autoinstrumentation/packages/esbuild-plugin-node#readme",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=14"
@@ -17,7 +17,7 @@
     ".": "./build/src/index.js",
     "./register": "./build/src/register.js"
   },
-  "repository": "open-telemetry/opentelemetry-js-contrib",
+  "repository": "coralogix/opentelemetry-js-contrib",
   "scripts": {
     "clean": "rimraf build/*",
     "compile": "tsc -p .",
@@ -31,7 +31,7 @@
     "watch": "tsc -w"
   },
   "bugs": {
-    "url": "https://github.com/open-telemetry/opentelemetry-js-contrib/issues"
+    "url": "https://github.com/coralogix/opentelemetry-js-contrib/issues"
   },
   "peerDependencies": {
     "esbuild": "0.21.x"
@@ -55,7 +55,8 @@
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "0.50.0",
     "@opentelemetry/instrumentation": "0.53.0",
-    "esbuild": "0.21.x"
+    "esbuild": "0.21.x",
+    "semver": "7.6.3"
   },
   "files": [
     "build/src/**/*.js",
