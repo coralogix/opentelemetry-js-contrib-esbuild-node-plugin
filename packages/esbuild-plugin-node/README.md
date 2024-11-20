@@ -80,7 +80,7 @@ build({
   plugins: [
     openTelemetryPlugin({
       instrumentationConfig: {
-        '@coralogix/instrumentation-aws-sdk': {
+        '@opentelemetry/instrumentation-aws-sdk': {
           suppressInternalInstrumentation: true,
         },
       },
@@ -104,13 +104,13 @@ The reason for this is that the current mechanism of instrumenting packages invo
 ```javascript
 const {
   getNodeAutoInstrumentations,
-} = require('@coralogix/auto-instrumentations-node');
+} = require('@opentelemetry/auto-instrumentations-node');
 const {
   AsyncHooksContextManager,
-} = require('@coralogix/context-async-hooks');
+} = require('@opentelemetry/context-async-hooks');
 const {
   OTLPTraceExporter,
-} = require('@coralogix/exporter-trace-otlp-http');
+} = require('@opentelemetry/exporter-trace-otlp-http');
 const { NodeSDK } = require('@coralogix/sdk-node');
 
 const instrumentations = getNodeAutoInstrumentations();
@@ -130,7 +130,7 @@ process.on('SIGTERM', () => {
 
 ## Supported instrumentations
 
-See [@coralogix/auto-instrumentations-node](https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/metapackages/auto-instrumentations-node) for the supported packages.
+See [@opentelemetry/auto-instrumentations-node](https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/metapackages/auto-instrumentations-node) for the supported packages.
 
 Note that Node.js builtin modules will not be patched by this plugin.
 
